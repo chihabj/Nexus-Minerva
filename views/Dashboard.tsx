@@ -1,8 +1,9 @@
-
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { supabase } from '../services/supabaseClient';
+import type { Reminder, Client } from '../types';
 
-const data = [
+const chartData = [
   { name: 'Mon', value: 40 },
   { name: 'Tue', value: 30 },
   { name: 'Wed', value: 65 },
@@ -12,14 +13,54 @@ const data = [
   { name: 'Sun', value: 20 },
 ];
 
-const reminders = [
-  { id: '#4920', name: 'John Smith', vehicle: 'Ford F-150 (2018)', lastVisit: 'Oct 12, 2023', status: 'Ready' },
-  { id: '#4921', name: 'Maria Garcia', vehicle: 'Toyota Camry', lastVisit: 'Oct 10, 2023', status: 'Pending' },
-  { id: '#4890', name: 'Robert Jones', vehicle: 'Honda Civic', lastVisit: 'Sep 28, 2023', status: 'Sent' },
-  { id: '#5012', name: 'Sarah Connor', vehicle: 'Jeep Wrangler', lastVisit: 'Oct 11, 2023', status: 'Ready' },
-];
+interface ReminderWithClient extends Reminder {
+  clients: Client | null;
+}
 
 export default function Dashboard() {
+  const [reminders, setReminders] = useState<ReminderWithClient[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchReminders() {
+      try {
+        setLoading(true);
+        const today = new Date().toISOString().split('T')[0];
+        
+        const { data, error } = await supabase
+          .from('reminders')
+          .select(`
+            *,
+            clients (*)
+          `)
+          .gte('reminder_date', today)
+          .order('reminder_date', { ascending: true })
+          .limit(10);
+
+        if (error) throw error;
+        setReminders(data || []);
+      } catch (err) {
+        console.error('Error fetching reminders:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load reminders');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchReminders();
+  }, []);
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'Ready': return 'bg-green-100 text-green-700';
+      case 'Pending': return 'bg-amber-100 text-amber-700';
+      case 'Sent': return 'bg-slate-100 text-slate-700';
+      case 'Failed': return 'bg-red-100 text-red-700';
+      default: return 'bg-slate-100 text-slate-700';
+    }
+  };
+
   return (
     <div className="p-8 h-full overflow-y-auto custom-scrollbar">
       <div className="max-w-7xl mx-auto space-y-8">
@@ -28,6 +69,7 @@ export default function Dashboard() {
           <p className="text-slate-500 dark:text-slate-400">Here is what's happening in your technical centers today.</p>
         </div>
 
+        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
             <div className="flex items-center justify-between mb-4">
@@ -64,54 +106,71 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Reminders Table */}
           <div className="lg:col-span-2 bg-white dark:bg-surface-dark rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col">
             <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
               <h4 className="font-bold text-lg">Today's Reminders</h4>
               <button className="text-primary text-sm font-medium hover:underline">View All</button>
             </div>
             <div className="flex-1 overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-xs font-semibold uppercase tracking-wider">
-                  <tr>
-                    <th className="px-6 py-4">Client</th>
-                    <th className="px-6 py-4">Vehicle</th>
-                    <th className="px-6 py-4">Status</th>
-                    <th className="px-6 py-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {reminders.map((r) => (
-                    <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="font-semibold text-sm">{r.name}</div>
-                        <div className="text-xs text-slate-400">ID {r.id}</div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-400">{r.vehicle}</td>
-                      <td className="px-6 py-4">
-                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${
-                          r.status === 'Ready' ? 'bg-green-100 text-green-700' : 
-                          r.status === 'Pending' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'
-                        }`}>
-                          {r.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button className="text-primary hover:bg-primary/10 p-2 rounded-lg transition-all">
-                          <span className="material-symbols-outlined text-[18px]">send</span>
-                        </button>
-                      </td>
+              {loading ? (
+                <div className="flex items-center justify-center p-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              ) : error ? (
+                <div className="flex items-center justify-center p-12 text-red-500">
+                  <span className="material-symbols-outlined mr-2">error</span>
+                  {error}
+                </div>
+              ) : reminders.length === 0 ? (
+                <div className="flex items-center justify-center p-12 text-slate-400">
+                  <span className="material-symbols-outlined mr-2">event_busy</span>
+                  No reminders for today
+                </div>
+              ) : (
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-xs font-semibold uppercase tracking-wider">
+                    <tr>
+                      <th className="px-6 py-4">Client</th>
+                      <th className="px-6 py-4">Vehicle</th>
+                      <th className="px-6 py-4">Status</th>
+                      <th className="px-6 py-4 text-right">Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {reminders.map((r) => (
+                      <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="font-semibold text-sm">{r.clients?.name || 'Unknown'}</div>
+                          <div className="text-xs text-slate-400">ID #{r.client_id.slice(0, 4)}</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-400">
+                          {r.clients?.vehicle || 'N/A'} {r.clients?.vehicle_year ? `(${r.clients.vehicle_year})` : ''}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${getStatusColor(r.status)}`}>
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button className="text-primary hover:bg-primary/10 p-2 rounded-lg transition-all">
+                            <span className="material-symbols-outlined text-[18px]">send</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
 
+          {/* Chart */}
           <div className="bg-white dark:bg-surface-dark rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 flex flex-col">
             <h4 className="font-bold text-lg mb-6">Service Volume</h4>
             <div className="flex-1 min-h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data}>
+                <BarChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
                   <YAxis hide />
@@ -120,7 +179,7 @@ export default function Dashboard() {
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                   />
                   <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                    {data.map((entry, index) => (
+                    {chartData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.value > 60 ? '#135bec' : '#94a3b8'} />
                     ))}
                   </Bar>
