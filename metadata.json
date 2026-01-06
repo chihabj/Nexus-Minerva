@@ -1,0 +1,7 @@
+{
+  "name": "Nexus Connect CRM",
+  "description": "An internal operational CRM for technical centers featuring AI-powered data mapping, smart communication logs, and real-time operational dashboards for managers and administrative staff.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
