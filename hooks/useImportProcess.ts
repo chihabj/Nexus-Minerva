@@ -67,6 +67,7 @@ export const DB_FIELDS: MappingField[] = [
   { dbField: 'vehicle_year', label: 'Vehicle Year', required: false, confidence: 'None' },
   { dbField: 'last_visit', label: 'Last Visit Date', required: true, confidence: 'None' },
   { dbField: 'region', label: 'Region', required: false, confidence: 'None' },
+  { dbField: 'center_name', label: 'Centre de visite', required: true, confidence: 'None' },
 ];
 
 // ============================================
@@ -389,16 +390,22 @@ export function useImportProcess() {
                 case 'region':
                   client.region = normalizeText(strValue);
                   break;
+                case 'center_name':
+                  client.center_name = normalizeText(strValue);
+                  break;
               }
             }
           }
 
-          // Validate required fields (phone and last_visit)
+          // Validate required fields (phone, last_visit, center_name)
           if (!client.phone) {
             throw new Error(`Row ${i + 2}: Phone number is required`);
           }
           if (!client.last_visit) {
             throw new Error(`Row ${i + 2}: Last visit date is required`);
+          }
+          if (!client.center_name) {
+            throw new Error(`Row ${i + 2}: Centre de visite is required`);
           }
 
           clientsToInsert.push(client);
@@ -532,11 +539,12 @@ function getFieldKeywords(dbField: string): string[] {
   const keywordMap: Record<string, string[]> = {
     name: ['name', 'nom', 'full name', 'client', 'customer', 'prénom', 'firstname', 'lastname'],
     email: ['email', 'mail', 'e-mail', 'courriel', 'address'],
-    phone: ['phone', 'mobile', 'tel', 'telephone', 'téléphone', 'cell', 'number', 'numéro'],
+    phone: ['phone', 'mobile', 'tel', 'telephone', 'téléphone', 'cell', 'number', 'numéro', 'gsm'],
     vehicle: ['vehicle', 'car', 'voiture', 'model', 'modèle', 'marque', 'brand', 'auto'],
     vehicle_year: ['year', 'année', 'annee', 'model year'],
-    last_visit: ['visit', 'date', 'last', 'dernier', 'visite', 'appointment', 'rdv'],
+    last_visit: ['visit', 'date', 'last', 'dernier', 'visite', 'appointment', 'rdv', 'passage'],
     region: ['region', 'région', 'area', 'zone', 'sector', 'location', 'city', 'ville'],
+    center_name: ['center', 'centre', 'visite', 'agence', 'point', 'garage', 'atelier', 'site', 'location'],
   };
 
   return keywordMap[dbField] || [dbField];

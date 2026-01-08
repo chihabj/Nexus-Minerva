@@ -13,7 +13,7 @@ export interface Client {
   id: string;
   created_at: string;
   updated_at: string;
-  name: string;
+  name: string | null;
   email: string | null;
   phone: string | null;
   vehicle: string | null;
@@ -22,6 +22,7 @@ export interface Client {
   status: ReminderStatus;
   region: string | null;
   center_id: string | null;
+  center_name: string | null;
 }
 
 // Reminder table (for Dashboard)
