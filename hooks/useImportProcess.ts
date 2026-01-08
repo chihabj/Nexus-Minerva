@@ -422,7 +422,7 @@ export function useImportProcess() {
         for (let i = 0; i < clientsToInsert.length; i += batchSize) {
           const batch = clientsToInsert.slice(i, i + batchSize);
           
-          const { data, error } = await supabase
+          const { data: insertedClients, error } = await supabase
             .from('clients')
             .insert(batch)
             .select();
@@ -430,8 +430,55 @@ export function useImportProcess() {
           if (error) {
             failed += batch.length;
             errors.push(`Batch insert error: ${error.message}`);
-          } else {
-            inserted += data?.length || 0;
+          } else if (insertedClients && insertedClients.length > 0) {
+            inserted += insertedClients.length;
+            
+            // Create reminders for each inserted client (2-year rule)
+            const remindersToInsert = insertedClients.map(client => {
+              const lastVisit = new Date(client.last_visit);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              
+              // Calculate next visit = last_visit + 2 years
+              const nextVisit = new Date(lastVisit);
+              nextVisit.setFullYear(nextVisit.getFullYear() + 2);
+              
+              // due_date = next_visit (date limite de visite technique)
+              const dueDate = nextVisit.toISOString().split('T')[0];
+              
+              // reminder_date = due_date - 30 days (date d'envoi de la relance)
+              const reminderDate = new Date(nextVisit);
+              reminderDate.setDate(reminderDate.getDate() - 30);
+              const reminderDateStr = reminderDate.toISOString().split('T')[0];
+              
+              // If last_visit > 2 years ago (overdue), status = 'Ready' for immediate action
+              // Otherwise status = 'Pending'
+              const twoYearsAgo = new Date(today);
+              twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+              const isOverdue = lastVisit < twoYearsAgo;
+              
+              return {
+                client_id: client.id,
+                due_date: dueDate,
+                reminder_date: reminderDateStr,
+                status: isOverdue ? 'Ready' : 'Pending',
+                message_template: isOverdue 
+                  ? 'Votre visite technique est en retard. Merci de prendre rendez-vous rapidement.'
+                  : 'Votre prochaine visite technique est prévue bientôt. Pensez à prendre rendez-vous.',
+              };
+            });
+            
+            // Insert reminders
+            if (remindersToInsert.length > 0) {
+              const { error: reminderError } = await supabase
+                .from('reminders')
+                .insert(remindersToInsert);
+              
+              if (reminderError) {
+                console.warn('Failed to create reminders:', reminderError.message);
+                // Don't fail the whole import for reminder creation errors
+              }
+            }
           }
         }
       }
