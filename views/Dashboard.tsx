@@ -10,7 +10,9 @@ export default function Dashboard() {
   const [reminders, setReminders] = useState<ReminderWithClient[]>([]);
   const [stats, setStats] = useState({
     totalClients: 0,
+    totalReminders: 0,
     readyReminders: 0,
+    pendingReminders: 0,
     sentToday: 0,
   });
   const [loading, setLoading] = useState(true);
@@ -25,17 +27,14 @@ export default function Dashboard() {
       
       const today = new Date().toISOString().split('T')[0];
       
-      // Fetch reminders that are Ready or have reminder_date <= today
+      // Fetch ALL reminders, sorted by due_date ASC
       const { data: reminderData, error: reminderError } = await supabase
         .from('reminders')
         .select(`
           *,
           clients (*)
         `)
-        .or(`status.eq.Ready,reminder_date.lte.${today}`)
-        .order('status', { ascending: true }) // Ready first
-        .order('reminder_date', { ascending: true })
-        .limit(20);
+        .order('due_date', { ascending: true });
 
       if (reminderError) throw reminderError;
       setReminders(reminderData || []);
@@ -45,10 +44,19 @@ export default function Dashboard() {
         .from('clients')
         .select('*', { count: 'exact', head: true });
 
+      const { count: totalReminders } = await supabase
+        .from('reminders')
+        .select('*', { count: 'exact', head: true });
+
       const { count: readyCount } = await supabase
         .from('reminders')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'Ready');
+
+      const { count: pendingCount } = await supabase
+        .from('reminders')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'Pending');
 
       const { count: sentCount } = await supabase
         .from('reminders')
@@ -58,7 +66,9 @@ export default function Dashboard() {
 
       setStats({
         totalClients: totalClients || 0,
+        totalReminders: totalReminders || 0,
         readyReminders: readyCount || 0,
+        pendingReminders: pendingCount || 0,
         sentToday: sentCount || 0,
       });
     } catch (err) {
@@ -217,10 +227,10 @@ export default function Dashboard() {
           
           <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <span className="material-symbols-outlined text-purple-500 bg-purple-50 dark:bg-purple-900/20 p-2 rounded-lg">schedule</span>
+              <span className="material-symbols-outlined text-amber-500 bg-amber-50 dark:bg-amber-900/20 p-2 rounded-lg">schedule</span>
             </div>
-            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Fréquence CT</p>
-            <h3 className="text-3xl font-bold mt-1">2 ans</h3>
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">En Attente</p>
+            <h3 className="text-3xl font-bold mt-1">{stats.pendingReminders}</h3>
           </div>
         </div>
 
@@ -228,9 +238,9 @@ export default function Dashboard() {
         <div className="bg-white dark:bg-surface-dark rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col">
           <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
             <div>
-              <h4 className="font-bold text-lg">Relances à Traiter</h4>
+              <h4 className="font-bold text-lg">Toutes les Relances</h4>
               <p className="text-sm text-slate-500 mt-0.5">
-                Clients dont la visite technique arrive à échéance (règle des 2 ans)
+                {stats.totalReminders} relance{stats.totalReminders > 1 ? 's' : ''} • Triées par date d'échéance
               </p>
             </div>
             <button 

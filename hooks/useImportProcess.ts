@@ -408,6 +408,11 @@ export function useImportProcess() {
             throw new Error(`Row ${i + 2}: Centre de visite is required`);
           }
 
+          // If name is empty/missing, use phone number as default name
+          if (!client.name || client.name.trim() === '') {
+            client.name = client.phone;
+          }
+
           clientsToInsert.push(client);
         } catch (error) {
           failed++;
