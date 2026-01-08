@@ -2,7 +2,8 @@
 // DATABASE TYPES (matching Supabase schema)
 // ===========================================
 
-export type ReminderStatus = 'Ready' | 'Pending' | 'Sent' | 'Failed';
+export type ReminderStatus = 'Ready' | 'Pending' | 'Sent' | 'Failed' | 'Resolved';
+export type NoteType = 'note' | 'call' | 'appointment' | 'system';
 export type MessageSender = 'user' | 'agent' | 'system';
 export type MessageStatus = 'sent' | 'delivered' | 'read';
 export type CenterStatus = 'Connected' | 'Pending' | 'Disconnected';
@@ -65,6 +66,16 @@ export interface TechCenter {
   phone: string | null;
 }
 
+// ClientNote table (for internal notes on clients)
+export interface ClientNote {
+  id: string;
+  created_at: string;
+  client_id: string;
+  content: string;
+  author: string;
+  note_type: NoteType;
+}
+
 // Mapping fields for import feature
 export interface MappingField {
   dbField: string;
@@ -101,6 +112,11 @@ export interface Database {
         Row: TechCenter;
         Insert: Omit<TechCenter, 'id' | 'created_at'>;
         Update: Partial<Omit<TechCenter, 'id' | 'created_at'>>;
+      };
+      client_notes: {
+        Row: ClientNote;
+        Insert: Omit<ClientNote, 'id' | 'created_at'>;
+        Update: Partial<Omit<ClientNote, 'id' | 'created_at'>>;
       };
     };
   };

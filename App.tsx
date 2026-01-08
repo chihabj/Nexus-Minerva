@@ -6,6 +6,7 @@ import Inbox from './views/Inbox';
 import ImportData from './views/ImportData';
 import Centers from './views/Centers';
 import Clients from './views/Clients';
+import ClientDetails from './views/ClientDetails';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -109,6 +110,7 @@ export default function App() {
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/import" element={<ImportData />} />
               <Route path="/clients" element={<Clients />} />
+              <Route path="/clients/:id" element={<ClientDetails />} />
               <Route path="/centers" element={<Centers />} />
             </Routes>
           </main>

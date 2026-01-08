@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
 import { formatPhoneDisplay } from '../utils/dataNormalizer';
 import type { Client } from '../types';
 
 export default function Clients() {
+  const navigate = useNavigate();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -220,7 +222,8 @@ export default function Clients() {
                     {filteredClients.map((client) => (
                       <tr 
                         key={client.id} 
-                        className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors"
+                        onClick={() => navigate(`/clients/${client.id}`)}
+                        className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors cursor-pointer"
                       >
                         {/* Client Info */}
                         <td className="px-6 py-4">
