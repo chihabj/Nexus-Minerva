@@ -2,13 +2,44 @@
  * Actions pour l'envoi de relances WhatsApp
  */
 
-import { sendHelloWorldTemplate, cleanPhoneNumber, WhatsAppResponse } from '../services/whatsapp';
+import { sendRappelVisiteTechnique, cleanPhoneNumber, WhatsAppResponse } from '../services/whatsapp';
 import { supabase } from '../services/supabaseClient';
 
 export interface SendReminderResult {
   success: boolean;
   messageId?: string;
   error?: string;
+}
+
+/**
+ * Formate une date pour l'affichage dans le message WhatsApp
+ */
+function formatDateForMessage(dateStr: string | null): string {
+  if (!dateStr) return 'Bientôt';
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+/**
+ * Calcule la date d'échéance (last_visit + 2 ans)
+ */
+function calculateDueDate(lastVisit: string | null): string {
+  if (!lastVisit) return 'Bientôt';
+  try {
+    const date = new Date(lastVisit);
+    date.setFullYear(date.getFullYear() + 2);
+    return formatDateForMessage(date.toISOString());
+  } catch {
+    return 'Bientôt';
+  }
 }
 
 /**
@@ -46,11 +77,65 @@ export async function sendReminderAction(
     };
   }
 
-  console.log(`📱 Envoi de relance ${reminderId} vers ${cleanedPhone}...`);
+  console.log(`📱 Préparation de la relance ${reminderId}...`);
 
   try {
-    // 1. Envoyer le message WhatsApp
-    const whatsappResult: WhatsAppResponse = await sendHelloWorldTemplate(cleanedPhone);
+    // 1. Récupérer les infos du reminder et du client depuis Supabase
+    const { data: reminder, error: fetchError } = await supabase
+      .from('reminders')
+      .select(`
+        *,
+        clients (
+          id,
+          name,
+          phone,
+          vehicle,
+          vehicle_year,
+          last_visit,
+          center_name
+        )
+      `)
+      .eq('id', reminderId)
+      .single();
+
+    if (fetchError || !reminder) {
+      console.error('❌ Erreur récupération reminder:', fetchError);
+      return {
+        success: false,
+        error: 'Relance introuvable',
+      };
+    }
+
+    const client = reminder.clients;
+    if (!client) {
+      return {
+        success: false,
+        error: 'Client introuvable pour cette relance',
+      };
+    }
+
+    // 2. Préparer les variables du template
+    const clientName = client.name || 'Client';
+    const vehicleName = client.vehicle 
+      ? `${client.vehicle}${client.vehicle_year ? ` (${client.vehicle_year})` : ''}`
+      : 'votre véhicule';
+    const dateEcheance = reminder.due_date 
+      ? formatDateForMessage(reminder.due_date)
+      : calculateDueDate(client.last_visit);
+
+    console.log(`📤 Envoi à ${cleanedPhone}:`, {
+      clientName,
+      vehicleName,
+      dateEcheance,
+    });
+
+    // 3. Envoyer le message WhatsApp avec le template rappel_visite_technique
+    const whatsappResult: WhatsAppResponse = await sendRappelVisiteTechnique({
+      to: cleanedPhone,
+      clientName,
+      vehicleName,
+      dateEcheance,
+    });
 
     if (!whatsappResult.success) {
       console.error('❌ Échec envoi WhatsApp:', whatsappResult.error);
@@ -70,13 +155,13 @@ export async function sendReminderAction(
       };
     }
 
-    // 2. Mettre à jour le statut en 'Sent' dans Supabase
+    // 4. Mettre à jour le statut en 'Sent' dans Supabase
     const { error: updateError } = await supabase
       .from('reminders')
       .update({
         status: 'Sent',
         sent_at: new Date().toISOString(),
-        message: `WhatsApp envoyé - ID: ${whatsappResult.messageId}`,
+        message: `WhatsApp envoyé - Template: rappel_visite_technique - ID: ${whatsappResult.messageId}`,
       })
       .eq('id', reminderId);
 
@@ -89,24 +174,15 @@ export async function sendReminderAction(
       };
     }
 
-    // 3. Ajouter une note système dans client_notes
-    // D'abord, récupérer le client_id du reminder
-    const { data: reminder } = await supabase
-      .from('reminders')
-      .select('client_id')
-      .eq('id', reminderId)
-      .single();
-
-    if (reminder?.client_id) {
-      await supabase
-        .from('client_notes')
-        .insert({
-          client_id: reminder.client_id,
-          content: `Relance WhatsApp envoyée (template: hello_world)`,
-          author: 'Système',
-          note_type: 'system',
-        });
-    }
+    // 5. Ajouter une note système dans client_notes
+    await supabase
+      .from('client_notes')
+      .insert({
+        client_id: client.id,
+        content: `Relance WhatsApp envoyée (rappel_visite_technique)\n• Nom: ${clientName}\n• Véhicule: ${vehicleName}\n• Échéance: ${dateEcheance}`,
+        author: 'Système',
+        note_type: 'system',
+      });
 
     console.log('✅ Relance envoyée avec succès:', whatsappResult.messageId);
 
@@ -152,8 +228,8 @@ export async function sendBatchReminders(
       failed++;
     }
 
-    // Pause entre les envois pour respecter les rate limits
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Pause entre les envois pour respecter les rate limits (1 par seconde max)
+    await new Promise(resolve => setTimeout(resolve, 1500));
   }
 
   return {

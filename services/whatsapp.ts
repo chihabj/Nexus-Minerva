@@ -16,11 +16,35 @@ export interface WhatsAppResponse {
   error?: string;
 }
 
+export interface TemplateParameter {
+  type: 'text' | 'currency' | 'date_time' | 'image' | 'document' | 'video';
+  text?: string;
+  currency?: { fallback_value: string; code: string; amount_1000: number };
+  date_time?: { fallback_value: string };
+}
+
+export interface TemplateComponent {
+  type: 'header' | 'body' | 'button';
+  parameters?: TemplateParameter[];
+  sub_type?: string;
+  index?: number;
+}
+
 export interface WhatsAppTemplateParams {
   to: string;
   templateName: string;
   languageCode?: string;
-  components?: any[];
+  components?: TemplateComponent[];
+}
+
+/**
+ * Paramètres spécifiques pour le template rappel_visite_technique
+ */
+export interface RappelVisiteTechniqueParams {
+  to: string;
+  clientName: string;
+  vehicleName: string;
+  dateEcheance: string;
 }
 
 /**
@@ -44,16 +68,12 @@ export function cleanPhoneNumber(phone: string): string {
 }
 
 /**
- * Envoie un template WhatsApp via l'API Meta Cloud
- * 
- * @param to - Numéro de téléphone du destinataire (format E.164 sans +)
- * @param templateName - Nom du template approuvé (ex: 'hello_world')
- * @param languageCode - Code langue du template (défaut: 'en_US')
+ * Envoie un template WhatsApp générique via l'API Meta Cloud
  */
 export async function sendWhatsAppTemplate({
   to,
   templateName,
-  languageCode = 'en_US',
+  languageCode = 'fr',
   components = [],
 }: WhatsAppTemplateParams): Promise<WhatsAppResponse> {
   
@@ -95,7 +115,8 @@ export async function sendWhatsAppTemplate({
   console.log('📤 Sending WhatsApp message:', {
     to: cleanedPhone,
     template: templateName,
-    url: GRAPH_API_URL,
+    language: languageCode,
+    components: JSON.stringify(components),
   });
 
   try {
@@ -134,7 +155,42 @@ export async function sendWhatsAppTemplate({
 }
 
 /**
+ * Envoie le template "rappel_visite_technique" avec les variables du client
+ * 
+ * Variables du template:
+ * - {{1}} = Nom du client
+ * - {{2}} = Véhicule
+ * - {{3}} = Date d'échéance
+ */
+export async function sendRappelVisiteTechnique({
+  to,
+  clientName,
+  vehicleName,
+  dateEcheance,
+}: RappelVisiteTechniqueParams): Promise<WhatsAppResponse> {
+  
+  const components: TemplateComponent[] = [
+    {
+      type: 'body',
+      parameters: [
+        { type: 'text', text: clientName || 'Client' },      // {{1}}
+        { type: 'text', text: vehicleName || 'Véhicule' },   // {{2}}
+        { type: 'text', text: dateEcheance || 'Bientôt' },   // {{3}}
+      ],
+    },
+  ];
+
+  return sendWhatsAppTemplate({
+    to,
+    templateName: 'rappel_visite_technique',
+    languageCode: 'fr',
+    components,
+  });
+}
+
+/**
  * Envoie le template hello_world (template par défaut du Sandbox)
+ * Utile pour les tests
  */
 export async function sendHelloWorldTemplate(to: string): Promise<WhatsAppResponse> {
   return sendWhatsAppTemplate({
