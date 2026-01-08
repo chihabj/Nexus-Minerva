@@ -6,67 +6,143 @@ import { parsePhoneNumberFromString, isValidPhoneNumber, CountryCode } from 'lib
 
 /**
  * Normalize a phone number to E.164 format
- * @param phone - Raw phone number string
+ * Handles mixed data from Excel:
+ * - Moroccan: 212660703622 (starts with 212, no +)
+ * - French: 33661934506 (starts with 33, no +)
+ * - Local: 061159033 (needs default country)
+ * 
+ * @param phone - Raw phone number (string or number from Excel)
  * @param defaultCountry - Default country code (e.g., 'FR' for France)
- * @returns E.164 formatted phone number (e.g., +33612345678) or original if invalid
+ * @returns E.164 formatted phone number (e.g., +212660703622)
  */
-export function normalizePhone(phone: string, defaultCountry: CountryCode = 'FR'): string {
-  if (!phone || typeof phone !== 'string') {
+export function normalizePhone(phone: string | number, defaultCountry: CountryCode = 'FR'): string {
+  // Step 1: Convert to string and clean
+  if (phone === null || phone === undefined) {
     return '';
   }
-
-  // Clean the input
-  const cleaned = phone.trim();
+  
+  // Convert to string (handles numbers from Excel)
+  let cleaned = String(phone).trim();
   if (!cleaned) {
     return '';
   }
 
+  // Step 2: Remove all non-digit characters except +
+  let digits = cleaned.replace(/[^\d+]/g, '');
+  
+  if (!digits) {
+    return '';
+  }
+
   try {
-    // Try to parse the phone number
-    const phoneNumber = parsePhoneNumberFromString(cleaned, defaultCountry);
+    // Step 3: Apply heuristic rules to add country code prefix
+    let normalizedNumber = applyCountryCodeHeuristics(digits);
+
+    // Step 4: Try to parse with libphonenumber-js
+    let phoneNumber = parsePhoneNumberFromString(normalizedNumber, defaultCountry);
     
     if (phoneNumber && phoneNumber.isValid()) {
-      // Return E.164 format
       return phoneNumber.format('E.164');
     }
 
-    // If parsing failed, try with different approaches
-    // Remove all non-digit characters except +
-    const digitsOnly = cleaned.replace(/[^\d+]/g, '');
-    
-    // If starts with country code, try parsing directly
-    if (digitsOnly.startsWith('+')) {
-      const retryPhone = parsePhoneNumberFromString(digitsOnly);
-      if (retryPhone && retryPhone.isValid()) {
-        return retryPhone.format('E.164');
+    // Step 5: Fallback - try with Morocco (MA) as alternative country
+    if (defaultCountry !== 'MA') {
+      phoneNumber = parsePhoneNumberFromString(normalizedNumber, 'MA');
+      if (phoneNumber && phoneNumber.isValid()) {
+        return phoneNumber.format('E.164');
       }
     }
 
-    // For French numbers starting with 0, convert to +33
-    if (defaultCountry === 'FR' && digitsOnly.startsWith('0') && digitsOnly.length === 10) {
-      const frenchNumber = '+33' + digitsOnly.substring(1);
-      const frPhone = parsePhoneNumberFromString(frenchNumber, 'FR');
-      if (frPhone && frPhone.isValid()) {
-        return frPhone.format('E.164');
+    // Step 6: Fallback - try with France (FR) if not already tried
+    if (defaultCountry !== 'FR') {
+      phoneNumber = parsePhoneNumberFromString(normalizedNumber, 'FR');
+      if (phoneNumber && phoneNumber.isValid()) {
+        return phoneNumber.format('E.164');
       }
     }
 
-    // Return cleaned version if we can't normalize
-    return digitsOnly || cleaned;
+    // Step 7: If still no valid parse, try local number formats
+    // Moroccan local number (0 + 9 digits)
+    if (digits.startsWith('0') && digits.length === 10) {
+      // Try as Moroccan local number first
+      const moroccanNumber = '+212' + digits.substring(1);
+      phoneNumber = parsePhoneNumberFromString(moroccanNumber, 'MA');
+      if (phoneNumber && phoneNumber.isValid()) {
+        return phoneNumber.format('E.164');
+      }
+      
+      // Try as French local number
+      const frenchNumber = '+33' + digits.substring(1);
+      phoneNumber = parsePhoneNumberFromString(frenchNumber, 'FR');
+      if (phoneNumber && phoneNumber.isValid()) {
+        return phoneNumber.format('E.164');
+      }
+    }
+
+    // Return the best normalized version we have
+    return normalizedNumber.startsWith('+') ? normalizedNumber : '+' + normalizedNumber;
   } catch (error) {
     console.warn(`Failed to normalize phone: ${phone}`, error);
-    return cleaned;
+    return digits;
   }
 }
 
 /**
- * Validate if a phone number is valid
+ * Apply heuristic rules to detect and add country code prefix
  */
-export function isValidPhone(phone: string, defaultCountry: CountryCode = 'FR'): boolean {
+function applyCountryCodeHeuristics(digits: string): string {
+  // Already has + prefix, keep as is
+  if (digits.startsWith('+')) {
+    return digits;
+  }
+
+  // Rule 1: Starts with '00' -> Replace with '+'
+  // Example: 00212660703622 -> +212660703622
+  if (digits.startsWith('00')) {
+    return '+' + digits.substring(2);
+  }
+
+  // Rule 2: Starts with '212' and more than 9 digits -> Moroccan number
+  // Example: 212660703622 -> +212660703622
+  if (digits.startsWith('212') && digits.length > 9) {
+    return '+' + digits;
+  }
+
+  // Rule 3: Starts with '33' and more than 9 digits -> French number
+  // Example: 33661934506 -> +33661934506
+  if (digits.startsWith('33') && digits.length > 9) {
+    return '+' + digits;
+  }
+
+  // Rule 4: Starts with '0' and exactly 10 digits -> Local number (handled later with country)
+  // Example: 0661934506 -> needs country context
+  
+  // Rule 5: Other country codes that might appear without +
+  const countryPrefixes = ['1', '44', '49', '34', '39', '31', '32', '41'];
+  for (const prefix of countryPrefixes) {
+    if (digits.startsWith(prefix) && digits.length > 9) {
+      return '+' + digits;
+    }
+  }
+
+  // No transformation needed, return as is
+  return digits;
+}
+
+/**
+ * Validate if a phone number is valid
+ * Applies the same normalization rules before validation
+ */
+export function isValidPhone(phone: string | number, defaultCountry: CountryCode = 'FR'): boolean {
   if (!phone) return false;
   
   try {
-    return isValidPhoneNumber(phone, defaultCountry);
+    // Normalize first, then validate
+    const normalized = normalizePhone(phone, defaultCountry);
+    if (!normalized) return false;
+    
+    const phoneNumber = parsePhoneNumberFromString(normalized);
+    return phoneNumber ? phoneNumber.isValid() : false;
   } catch {
     return false;
   }
@@ -75,11 +151,15 @@ export function isValidPhone(phone: string, defaultCountry: CountryCode = 'FR'):
 /**
  * Format phone for display (national format)
  */
-export function formatPhoneDisplay(phone: string, defaultCountry: CountryCode = 'FR'): string {
+export function formatPhoneDisplay(phone: string | number, defaultCountry: CountryCode = 'FR'): string {
   if (!phone) return '';
   
   try {
-    const phoneNumber = parsePhoneNumberFromString(phone, defaultCountry);
+    // Normalize first
+    const normalized = normalizePhone(phone, defaultCountry);
+    if (!normalized) return String(phone);
+    
+    const phoneNumber = parsePhoneNumberFromString(normalized);
     if (phoneNumber) {
       return phoneNumber.formatNational();
     }
@@ -87,7 +167,7 @@ export function formatPhoneDisplay(phone: string, defaultCountry: CountryCode = 
     // Ignore
   }
   
-  return phone;
+  return String(phone);
 }
 
 // ============================================
