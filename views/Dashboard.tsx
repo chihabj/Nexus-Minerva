@@ -21,6 +21,8 @@ export default function Dashboard() {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const [resetting, setResetting] = useState(false);
+
   // Auto-hide toast after 5 seconds
   useEffect(() => {
     if (toast) {
@@ -28,6 +30,29 @@ export default function Dashboard() {
       return () => clearTimeout(timer);
     }
   }, [toast]);
+
+  // Reset all reminders to Pending (for testing)
+  const handleResetForTesting = async () => {
+    if (!confirm('⚠️ Réinitialiser tous les statuts à "Pending" pour les tests ?')) return;
+    
+    setResetting(true);
+    try {
+      const { error } = await supabase
+        .from('reminders')
+        .update({ status: 'Pending', sent_at: null, message: null })
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Update all
+      
+      if (error) throw error;
+      
+      setToast({ type: 'success', message: '🔄 Tous les statuts réinitialisés à Pending' });
+      fetchData(); // Refresh data
+    } catch (err) {
+      console.error('Reset error:', err);
+      setToast({ type: 'error', message: 'Erreur lors du reset' });
+    } finally {
+      setResetting(false);
+    }
+  };
 
   // Fetch reminders and stats from Supabase
   const fetchData = useCallback(async () => {
@@ -228,9 +253,26 @@ export default function Dashboard() {
       )}
 
       <div className="max-w-7xl mx-auto space-y-8">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Tableau de Bord</h2>
-          <p className="text-slate-500 dark:text-slate-400">Vue d'ensemble des relances et du parc clients.</p>
+        <div className="flex items-start justify-between">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Tableau de Bord</h2>
+            <p className="text-slate-500 dark:text-slate-400">Vue d'ensemble des relances et du parc clients.</p>
+          </div>
+          
+          {/* Reset button for testing */}
+          <button
+            onClick={handleResetForTesting}
+            disabled={resetting}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            title="Réinitialiser tous les statuts pour les tests"
+          >
+            {resetting ? (
+              <div className="size-4 border-2 border-orange-600 border-t-transparent animate-spin rounded-full"></div>
+            ) : (
+              <span className="material-symbols-outlined text-[18px]">restart_alt</span>
+            )}
+            Reset Tests
+          </button>
         </div>
 
         {/* Stats Cards */}
