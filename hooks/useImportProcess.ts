@@ -60,8 +60,8 @@ export interface ImportState {
 
 // Database fields configuration
 export const DB_FIELDS: MappingField[] = [
-  { dbField: 'name', label: 'Full Name', required: true, confidence: 'None' },
-  { dbField: 'email', label: 'Email Address', required: true, confidence: 'None' },
+  { dbField: 'name', label: 'Full Name', required: false, confidence: 'None' },
+  { dbField: 'email', label: 'Email Address', required: false, confidence: 'None' },
   { dbField: 'phone', label: 'Phone Number', required: false, confidence: 'None' },
   { dbField: 'vehicle', label: 'Vehicle Model', required: false, confidence: 'None' },
   { dbField: 'vehicle_year', label: 'Vehicle Year', required: false, confidence: 'None' },
@@ -393,15 +393,11 @@ export function useImportProcess() {
             }
           }
 
-          // Validate required fields
-          if (!client.name) {
-            throw new Error(`Row ${i + 2}: Name is required`);
+          // Only insert if at least one field has data
+          const hasData = Object.values(client).some(v => v !== null && v !== undefined && v !== '' && v !== 'Pending');
+          if (hasData) {
+            clientsToInsert.push(client);
           }
-          if (!client.email) {
-            throw new Error(`Row ${i + 2}: Email is required`);
-          }
-
-          clientsToInsert.push(client);
         } catch (error) {
           failed++;
           errors.push(error instanceof Error ? error.message : `Row ${i + 2}: Unknown error`);
