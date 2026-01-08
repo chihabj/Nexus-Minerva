@@ -5,6 +5,7 @@ import Dashboard from './views/Dashboard';
 import Inbox from './views/Inbox';
 import ImportData from './views/ImportData';
 import Centers from './views/Centers';
+import Clients from './views/Clients';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -35,6 +36,10 @@ const Sidebar = () => {
         <Link to="/import" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive('/import') ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
           <span className="material-symbols-outlined">cloud_upload</span>
           <span className="text-sm">Import Data</span>
+        </Link>
+        <Link to="/clients" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive('/clients') ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+          <span className="material-symbols-outlined">contacts</span>
+          <span className="text-sm">Clients</span>
         </Link>
         <Link to="/centers" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive('/centers') ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
           <span className="material-symbols-outlined">storefront</span>
@@ -103,6 +108,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/import" element={<ImportData />} />
+              <Route path="/clients" element={<Clients />} />
               <Route path="/centers" element={<Centers />} />
             </Routes>
           </main>
