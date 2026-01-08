@@ -30,9 +30,11 @@ export interface Reminder {
   id: string;
   created_at: string;
   client_id: string;
-  reminder_date: string;
+  due_date: string;           // Date d'échéance (last_visit + 2 ans)
+  reminder_date: string;      // Date d'envoi (due_date - 30 jours)
   status: ReminderStatus;
   message: string | null;
+  message_template: string | null;
   sent_at: string | null;
   // Joined fields from clients
   client?: Client;
