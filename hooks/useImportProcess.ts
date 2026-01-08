@@ -62,10 +62,10 @@ export interface ImportState {
 export const DB_FIELDS: MappingField[] = [
   { dbField: 'name', label: 'Full Name', required: false, confidence: 'None' },
   { dbField: 'email', label: 'Email Address', required: false, confidence: 'None' },
-  { dbField: 'phone', label: 'Phone Number', required: false, confidence: 'None' },
+  { dbField: 'phone', label: 'Phone Number', required: true, confidence: 'None' },
   { dbField: 'vehicle', label: 'Vehicle Model', required: false, confidence: 'None' },
   { dbField: 'vehicle_year', label: 'Vehicle Year', required: false, confidence: 'None' },
-  { dbField: 'last_visit', label: 'Last Visit Date', required: false, confidence: 'None' },
+  { dbField: 'last_visit', label: 'Last Visit Date', required: true, confidence: 'None' },
   { dbField: 'region', label: 'Region', required: false, confidence: 'None' },
 ];
 
@@ -393,11 +393,15 @@ export function useImportProcess() {
             }
           }
 
-          // Only insert if at least one field has data
-          const hasData = Object.values(client).some(v => v !== null && v !== undefined && v !== '' && v !== 'Pending');
-          if (hasData) {
-            clientsToInsert.push(client);
+          // Validate required fields (phone and last_visit)
+          if (!client.phone) {
+            throw new Error(`Row ${i + 2}: Phone number is required`);
           }
+          if (!client.last_visit) {
+            throw new Error(`Row ${i + 2}: Last visit date is required`);
+          }
+
+          clientsToInsert.push(client);
         } catch (error) {
           failed++;
           errors.push(error instanceof Error ? error.message : `Row ${i + 2}: Unknown error`);
