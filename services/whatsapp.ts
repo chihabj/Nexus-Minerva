@@ -199,3 +199,112 @@ export async function sendHelloWorldTemplate(to: string): Promise<WhatsAppRespon
     languageCode: 'en_US',
   });
 }
+
+/**
+ * Envoie un message texte simple via WhatsApp
+ * ⚠️ Note: Les messages texte ne peuvent être envoyés que dans les 24h 
+ * suivant le dernier message du client (règle Meta)
+ */
+export async function sendTextMessage(to: string, text: string): Promise<WhatsAppResponse> {
+  // Validation
+  if (!WHATSAPP_API_TOKEN || !WHATSAPP_PHONE_ID) {
+    console.error('WhatsApp API credentials not configured');
+    return {
+      success: false,
+      error: 'WhatsApp API non configurée. Vérifiez les variables d\'environnement.',
+    };
+  }
+
+  const cleanedPhone = cleanPhoneNumber(to);
+  if (!cleanedPhone || cleanedPhone.length < 10) {
+    return {
+      success: false,
+      error: 'Numéro de téléphone invalide',
+    };
+  }
+
+  if (!text || text.trim().length === 0) {
+    return {
+      success: false,
+      error: 'Le message ne peut pas être vide',
+    };
+  }
+
+  const requestBody = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: cleanedPhone,
+    type: 'text',
+    text: {
+      preview_url: true,
+      body: text,
+    },
+  };
+
+  console.log('📤 Sending WhatsApp text message:', {
+    to: cleanedPhone,
+    text: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+  });
+
+  try {
+    const response = await fetch(GRAPH_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error('❌ WhatsApp API Error:', data);
+      return {
+        success: false,
+        error: data.error?.message || `Erreur API: ${response.status}`,
+      };
+    }
+
+    console.log('✅ WhatsApp text message sent:', data);
+    
+    return {
+      success: true,
+      messageId: data.messages?.[0]?.id,
+    };
+  } catch (error) {
+    console.error('❌ WhatsApp API Exception:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Erreur réseau',
+    };
+  }
+}
+
+/**
+ * Marque un message comme lu (envoie un read receipt)
+ */
+export async function markMessageAsRead(messageId: string): Promise<boolean> {
+  if (!WHATSAPP_API_TOKEN || !WHATSAPP_PHONE_ID) {
+    return false;
+  }
+
+  try {
+    const response = await fetch(GRAPH_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${WHATSAPP_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+      }),
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}

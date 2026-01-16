@@ -5,7 +5,10 @@
 export type ReminderStatus = 'Ready' | 'Pending' | 'Sent' | 'Failed' | 'Resolved';
 export type NoteType = 'note' | 'call' | 'appointment' | 'system';
 export type MessageSender = 'user' | 'agent' | 'system';
-export type MessageStatus = 'sent' | 'delivered' | 'read';
+export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+export type MessageDirection = 'inbound' | 'outbound';
+export type MessageType = 'text' | 'template' | 'image' | 'document' | 'audio' | 'video' | 'location' | 'reaction' | 'system';
+export type ConversationStatus = 'open' | 'resolved' | 'pending';
 export type CenterStatus = 'Connected' | 'Pending' | 'Disconnected';
 export type MappingConfidence = 'High' | 'Low' | 'None';
 
@@ -41,17 +44,42 @@ export interface Reminder {
   client?: Client;
 }
 
-// Message table
+// Conversation table (for WhatsApp conversations)
+export interface Conversation {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  client_id: string | null;
+  client_phone: string;
+  client_name: string | null;
+  last_message: string | null;
+  last_message_at: string;
+  unread_count: number;
+  status: ConversationStatus;
+  assigned_agent: string | null;
+  // Joined fields
+  client?: Client;
+  messages?: Message[];
+}
+
+// Message table (WhatsApp messages)
 export interface Message {
   id: string;
   created_at: string;
-  client_id: string;
-  sender: MessageSender;
-  text: string;
+  conversation_id: string;
+  wa_message_id: string | null;
+  from_phone: string;
+  to_phone: string;
+  direction: MessageDirection;
+  message_type: MessageType;
+  content: string | null;
+  template_name: string | null;
+  media_url: string | null;
   status: MessageStatus;
-  read_at: string | null;
+  error_message: string | null;
+  metadata: Record<string, any>;
   // Joined fields
-  client?: Client;
+  conversation?: Conversation;
 }
 
 // TechCenter table
@@ -102,6 +130,11 @@ export interface Database {
         Row: Reminder;
         Insert: Omit<Reminder, 'id' | 'created_at'>;
         Update: Partial<Omit<Reminder, 'id' | 'created_at'>>;
+      };
+      conversations: {
+        Row: Conversation;
+        Insert: Omit<Conversation, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<Conversation, 'id' | 'created_at'>>;
       };
       messages: {
         Row: Message;
