@@ -56,11 +56,16 @@ export default function Dashboard() {
 
   // Fetch reminders and stats from Supabase
   const fetchData = useCallback(async () => {
+    console.log('[Dashboard] Fetching data...');
     try {
       setLoading(true);
       setError(null);
       
       const today = new Date().toISOString().split('T')[0];
+      
+      // Add timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       
       // Fetch ALL reminders, sorted by due_date ASC
       const { data: reminderData, error: reminderError } = await supabase
@@ -69,9 +74,13 @@ export default function Dashboard() {
           *,
           clients (*)
         `)
-        .order('due_date', { ascending: true });
+        .order('due_date', { ascending: true })
+        .abortSignal(controller.signal);
 
+      clearTimeout(timeoutId);
+      
       if (reminderError) throw reminderError;
+      console.log('[Dashboard] Loaded', reminderData?.length, 'reminders');
       setReminders(reminderData || []);
 
       // Fetch stats

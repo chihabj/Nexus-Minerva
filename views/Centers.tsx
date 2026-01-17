@@ -34,17 +34,32 @@ export default function Centers() {
 
   const fetchCenters = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('tech_centers')
-      .select('*')
-      .order('name', { ascending: true });
+    console.log('[Centers] Fetching centers...');
+    
+    try {
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const { data, error } = await supabase
+        .from('tech_centers')
+        .select('*')
+        .order('name', { ascending: true })
+        .abortSignal(controller.signal);
+      
+      clearTimeout(timeoutId);
 
-    if (error) {
-      console.error('Error fetching centers:', error);
-    } else {
-      setCenters(data || []);
+      if (error) {
+        console.error('[Centers] Error fetching centers:', error);
+      } else {
+        console.log('[Centers] Loaded', data?.length, 'centers');
+        setCenters(data || []);
+      }
+    } catch (err) {
+      console.error('[Centers] Fetch exception:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const filterCenters = () => {
