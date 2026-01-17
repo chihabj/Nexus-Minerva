@@ -27,17 +27,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       console.log('[Auth] Fetching profile for user:', userId);
       
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const { data, error } = await supabase
         .from('user_profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle()
+        .abortSignal(controller.signal);
+      
+      clearTimeout(timeoutId);
+      
+      console.log('[Auth] Query result:', { data, error });
 
       if (error) {
         console.warn('[Auth] Profile fetch error:', error.message, error.code);
         
-        // If profile doesn't exist, try to create one from user metadata
-        if (error.code === 'PGRST116' && userEmail) {
+        // If profile doesn't exist or query failed, try to create one from user metadata
+        if ((error.code === 'PGRST116' || error.code === '20') && userEmail) {
           console.log('[Auth] Creating profile from metadata...');
           const newProfile: UserProfile = {
             id: userId,
@@ -84,7 +93,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
 
-      console.log('[Auth] Profile loaded:', data.email, 'role:', data.role);
+      // If no profile found (maybeSingle returns null), create from metadata
+      if (!data && userEmail) {
+        console.log('[Auth] No profile found, using metadata fallback');
+        return {
+          id: userId,
+          email: userEmail,
+          full_name: userMetadata?.full_name || userEmail.split('@')[0],
+          role: userMetadata?.role || 'agent',
+          avatar_url: null,
+          center_id: null,
+          is_active: true,
+          last_login: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+      }
+      
+      console.log('[Auth] Profile loaded:', data?.email, 'role:', data?.role);
       return data as UserProfile;
     } catch (err) {
       console.error('[Auth] Error fetching profile:', err);
