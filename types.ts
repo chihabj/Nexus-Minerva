@@ -2,7 +2,7 @@
 // DATABASE TYPES (matching Supabase schema)
 // ===========================================
 
-export type ReminderStatus = 'Ready' | 'Pending' | 'Sent' | 'Failed' | 'Resolved';
+export type ReminderStatus = 'Ready' | 'Pending' | 'Sent' | 'Failed' | 'Resolved' | 'Reminder_1' | 'Reminder_2' | 'Reminder_3' | 'Call_Required' | 'Completed' | 'Expired';
 export type NoteType = 'note' | 'call' | 'appointment' | 'system';
 export type MessageSender = 'user' | 'agent' | 'system';
 export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
@@ -11,6 +11,9 @@ export type MessageType = 'text' | 'template' | 'image' | 'document' | 'audio' |
 export type ConversationStatus = 'open' | 'resolved' | 'pending';
 export type CenterStatus = 'Connected' | 'Pending' | 'Disconnected';
 export type MappingConfidence = 'High' | 'Low' | 'None';
+export type UserRole = 'superadmin' | 'admin' | 'agent';
+export type NotificationType = 'info' | 'warning' | 'error' | 'success' | 'action_required';
+export type ReminderActionType = 'whatsapp' | 'call' | 'email';
 
 // Client table
 export interface Client {
@@ -112,6 +115,58 @@ export interface MappingField {
   mappedColumn?: string;
   confidence: MappingConfidence;
   sampleValue?: string;
+}
+
+// User Profile (extends Supabase auth.users)
+export interface UserProfile {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: UserRole;
+  avatar_url: string | null;
+  center_id: string | null;
+  is_active: boolean;
+  last_login: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Reminder Step (workflow definition)
+export interface ReminderStep {
+  id: string;
+  step_order: number;
+  days_before_due: number;
+  action_type: ReminderActionType;
+  template_name: string | null;
+  description: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+// Reminder Log (tracks sent reminders)
+export interface ReminderLog {
+  id: string;
+  reminder_id: string;
+  step_id: string | null;
+  action_type: ReminderActionType;
+  status: MessageStatus;
+  sent_at: string | null;
+  response_received: boolean;
+  response_text: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+// Notification
+export interface Notification {
+  id: string;
+  user_id: string;
+  title: string;
+  message: string;
+  type: NotificationType;
+  link: string | null;
+  is_read: boolean;
+  created_at: string;
 }
 
 // ===========================================

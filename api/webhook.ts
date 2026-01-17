@@ -130,13 +130,152 @@ async function getOrCreateConversation(phone: string, contactName?: string) {
 }
 
 /**
+ * Keywords that indicate a positive response (appointment booked)
+ */
+const POSITIVE_KEYWORDS = [
+  'rdv', 'rendez-vous', 'rendezvous', 'rendez vous',
+  'ok', 'oui', 'yes', 'd\'accord', 'daccord', 'accord',
+  'confirmé', 'confirme', 'confirmer', 'confirmation',
+  'réservé', 'reserve', 'réservation', 'reservation',
+  'pris', 'prendre', 'je prends',
+  'parfait', 'super', 'excellent', 'génial',
+  'merci', 'bien reçu', 'noté',
+  'je viens', 'je viendrai', 'je passerai',
+  'c\'est bon', 'c bon', 'cest bon',
+];
+
+/**
+ * Check if message content indicates appointment confirmation
+ */
+function isAppointmentConfirmation(content: string): boolean {
+  if (!content) return false;
+  
+  const normalizedContent = content
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ''); // Remove accents
+  
+  return POSITIVE_KEYWORDS.some(keyword => {
+    const normalizedKeyword = keyword
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+    return normalizedContent.includes(normalizedKeyword);
+  });
+}
+
+/**
+ * Find client and update reminder status if appointment is confirmed
+ */
+async function handleClientResponse(phone: string, content: string, clientId: string | null) {
+  const cleanPhone = phone.startsWith('+') ? phone.substring(1) : phone;
+  
+  // Find client by phone if not already known
+  let actualClientId = clientId;
+  if (!actualClientId) {
+    const { data: client } = await supabase
+      .from('clients')
+      .select('id')
+      .or(`phone.eq.${cleanPhone},phone.eq.+${cleanPhone}`)
+      .single();
+    
+    actualClientId = client?.id || null;
+  }
+  
+  if (!actualClientId) {
+    console.log('⚠️ No client found for phone:', cleanPhone);
+    return;
+  }
+  
+  // Check if this looks like an appointment confirmation
+  if (isAppointmentConfirmation(content)) {
+    console.log('🎉 Appointment confirmation detected!');
+    
+    // Update all pending reminders for this client to Resolved
+    const { data: updatedReminders, error } = await supabase
+      .from('reminders')
+      .update({ 
+        status: 'Resolved',
+        call_required: false,
+      })
+      .eq('client_id', actualClientId)
+      .not('status', 'in', '("Resolved","Completed","Expired")')
+      .select();
+    
+    if (error) {
+      console.error('Error updating reminders:', error);
+    } else if (updatedReminders && updatedReminders.length > 0) {
+      console.log(`✅ Marked ${updatedReminders.length} reminders as Resolved`);
+      
+      // Log the response in reminder_logs
+      for (const reminder of updatedReminders) {
+        await supabase.from('reminder_logs').insert({
+          reminder_id: reminder.id,
+          action_type: 'whatsapp',
+          status: 'delivered',
+          response_received: true,
+          response_text: content.substring(0, 500), // Truncate if too long
+        });
+      }
+      
+      // Create notification for admins
+      await createNotificationForAdmins(
+        '✅ RDV Confirmé',
+        `Le client a confirmé son rendez-vous. Message: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`,
+        'success',
+        `/clients/${actualClientId}`
+      );
+    }
+  } else {
+    // Still create a notification for any response
+    await createNotificationForAdmins(
+      '💬 Réponse client',
+      `Nouveau message du client: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`,
+      'info',
+      `/inbox`
+    );
+  }
+}
+
+/**
+ * Create notification for all admin/superadmin users
+ */
+async function createNotificationForAdmins(
+  title: string,
+  message: string,
+  type: 'info' | 'warning' | 'success' | 'action_required',
+  link?: string
+) {
+  const { data: admins } = await supabase
+    .from('user_profiles')
+    .select('id')
+    .in('role', ['admin', 'superadmin']);
+
+  if (admins && admins.length > 0) {
+    const notifications = admins.map(admin => ({
+      user_id: admin.id,
+      title,
+      message,
+      type,
+      link,
+    }));
+
+    await supabase.from('notifications').insert(notifications);
+    console.log(`📢 Created ${notifications.length} notifications`);
+  }
+}
+
+/**
  * Save an incoming message to the database
  */
 async function saveIncomingMessage(
   conversationId: string,
   message: WhatsAppMessage,
-  contactName?: string
+  contactName?: string,
+  clientId?: string | null
 ) {
+  const messageContent = message.text?.body || message.image?.caption || message.document?.caption || message.video?.caption || null;
+  
   const messageData = {
     conversation_id: conversationId,
     wa_message_id: message.id,
@@ -144,7 +283,7 @@ async function saveIncomingMessage(
     to_phone: OUR_PHONE_NUMBER,
     direction: 'inbound' as const,
     message_type: message.type,
-    content: message.text?.body || message.image?.caption || message.document?.caption || message.video?.caption || null,
+    content: messageContent,
     media_url: null, // TODO: Download media and store URL
     status: 'delivered' as const,
     metadata: {
@@ -171,6 +310,12 @@ async function saveIncomingMessage(
   }
 
   console.log('✅ Message saved:', data.id);
+  
+  // Process the response for appointment detection
+  if (messageContent) {
+    await handleClientResponse(message.from, messageContent, clientId || null);
+  }
+  
   return data;
 }
 
@@ -217,8 +362,8 @@ async function handleIncomingWebhook(req: VercelRequest, res: VercelResponse) {
             // Get or create conversation
             const conversation = await getOrCreateConversation(message.from, contactName);
             
-            // Save the message
-            await saveIncomingMessage(conversation.id, message, contactName);
+            // Save the message and process for appointment detection
+            await saveIncomingMessage(conversation.id, message, contactName, conversation.client_id);
           }
         }
 
