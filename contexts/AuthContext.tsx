@@ -23,8 +23,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   // Fetch user profile from user_profiles table
-  const fetchProfile = async (userId: string): Promise<UserProfile | null> => {
+  const fetchProfile = async (userId: string, userEmail?: string, userMetadata?: any): Promise<UserProfile | null> => {
     try {
+      console.log('[Auth] Fetching profile for user:', userId);
+      
       const { data, error } = await supabase
         .from('user_profiles')
         .select('*')
@@ -32,14 +34,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
 
       if (error) {
-        // Table might not exist yet - create a default profile object
-        console.warn('Profile fetch error (table may not exist):', error.message);
+        console.warn('[Auth] Profile fetch error:', error.message, error.code);
+        
+        // If profile doesn't exist, try to create one from user metadata
+        if (error.code === 'PGRST116' && userEmail) {
+          console.log('[Auth] Creating profile from metadata...');
+          const newProfile: UserProfile = {
+            id: userId,
+            email: userEmail,
+            full_name: userMetadata?.full_name || userEmail.split('@')[0],
+            role: userMetadata?.role || 'agent',
+            avatar_url: null,
+            center_id: null,
+            is_active: true,
+            last_login: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          
+          const { error: insertError } = await supabase
+            .from('user_profiles')
+            .insert(newProfile);
+          
+          if (insertError) {
+            console.error('[Auth] Failed to create profile:', insertError);
+          } else {
+            console.log('[Auth] Profile created successfully');
+            return newProfile;
+          }
+        }
+        
+        // Fallback: return a minimal profile from metadata so the app still works
+        if (userEmail && userMetadata) {
+          console.log('[Auth] Using fallback profile from metadata');
+          return {
+            id: userId,
+            email: userEmail,
+            full_name: userMetadata.full_name || userEmail.split('@')[0],
+            role: userMetadata.role || 'agent',
+            avatar_url: null,
+            center_id: null,
+            is_active: true,
+            last_login: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+        }
+        
         return null;
       }
 
+      console.log('[Auth] Profile loaded:', data.email, 'role:', data.role);
       return data as UserProfile;
     } catch (err) {
-      console.error('Error fetching profile:', err);
+      console.error('[Auth] Error fetching profile:', err);
       return null;
     }
   };
@@ -59,7 +107,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          const userProfile = await fetchProfile(session.user.id);
+          const userProfile = await fetchProfile(
+            session.user.id,
+            session.user.email,
+            session.user.user_metadata
+          );
           if (mounted) {
             setProfile(userProfile);
             
@@ -97,13 +149,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('[Auth] Auth state changed:', event);
         if (!mounted) return;
         
         setSession(session);
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          const userProfile = await fetchProfile(session.user.id);
+          const userProfile = await fetchProfile(
+            session.user.id,
+            session.user.email,
+            session.user.user_metadata
+          );
           if (mounted) setProfile(userProfile);
         } else {
           setProfile(null);
