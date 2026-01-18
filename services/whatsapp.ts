@@ -10,6 +10,19 @@ const WHATSAPP_PHONE_ID = import.meta.env.VITE_WHATSAPP_PHONE_ID;
 const GRAPH_API_VERSION = 'v17.0';
 const GRAPH_API_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}/${WHATSAPP_PHONE_ID}/messages`;
 
+/**
+ * 🚫 FLAG TEMPORAIRE - Désactive les appels WhatsApp API
+ * Mettre à true une fois la nouvelle app Meta configurée
+ */
+const WHATSAPP_ENABLED = false;
+
+/**
+ * Vérifie si WhatsApp est activé et configuré
+ */
+export function isWhatsAppEnabled(): boolean {
+  return WHATSAPP_ENABLED && !!WHATSAPP_API_TOKEN && !!WHATSAPP_PHONE_ID;
+}
+
 export interface WhatsAppResponse {
   success: boolean;
   messageId?: string;
@@ -76,6 +89,15 @@ export async function sendWhatsAppTemplate({
   languageCode = 'fr',
   components = [],
 }: WhatsAppTemplateParams): Promise<WhatsAppResponse> {
+  
+  // Check if WhatsApp is enabled
+  if (!WHATSAPP_ENABLED) {
+    console.warn('⚠️ WhatsApp API désactivée temporairement');
+    return {
+      success: false,
+      error: 'WhatsApp API désactivée temporairement. Configuration en cours...',
+    };
+  }
   
   // Validation
   if (!WHATSAPP_API_TOKEN || !WHATSAPP_PHONE_ID) {
@@ -206,6 +228,15 @@ export async function sendHelloWorldTemplate(to: string): Promise<WhatsAppRespon
  * suivant le dernier message du client (règle Meta)
  */
 export async function sendTextMessage(to: string, text: string): Promise<WhatsAppResponse> {
+  // Check if WhatsApp is enabled
+  if (!WHATSAPP_ENABLED) {
+    console.warn('⚠️ WhatsApp API désactivée temporairement');
+    return {
+      success: false,
+      error: 'WhatsApp API désactivée temporairement. Configuration en cours...',
+    };
+  }
+  
   // Validation
   if (!WHATSAPP_API_TOKEN || !WHATSAPP_PHONE_ID) {
     console.error('WhatsApp API credentials not configured');
@@ -285,7 +316,7 @@ export async function sendTextMessage(to: string, text: string): Promise<WhatsAp
  * Marque un message comme lu (envoie un read receipt)
  */
 export async function markMessageAsRead(messageId: string): Promise<boolean> {
-  if (!WHATSAPP_API_TOKEN || !WHATSAPP_PHONE_ID) {
+  if (!WHATSAPP_ENABLED || !WHATSAPP_API_TOKEN || !WHATSAPP_PHONE_ID) {
     return false;
   }
 
