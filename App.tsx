@@ -69,11 +69,13 @@ const Sidebar = () => {
   return (
     <aside className="w-64 flex-none bg-surface-light dark:bg-surface-dark border-r border-slate-200 dark:border-slate-800 flex flex-col h-full z-20">
       <div className="p-6 flex items-center gap-3">
-        <div className="bg-primary aspect-square rounded-xl size-10 flex items-center justify-center shadow-lg shadow-primary/20">
-          <span className="material-symbols-outlined text-white text-2xl">hub</span>
-        </div>
+        <img 
+          src="https://gqpi5bctag9pmq7q.public.blob.vercel-storage.com/minerva-ct-logo.webp" 
+          alt="Minerva CT" 
+          className="h-10 w-auto object-contain"
+        />
         <div className="flex flex-col">
-          <h1 className="text-slate-900 dark:text-white text-base font-bold leading-tight">Nexus Connect</h1>
+          <h1 className="text-slate-900 dark:text-white text-base font-bold leading-tight">Minerva CT</h1>
           <p className="text-slate-500 dark:text-slate-400 text-xs font-medium">CRM Portal</p>
         </div>
       </div>
