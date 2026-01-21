@@ -1,20 +1,117 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { sendTextMessage, markMessageAsRead } from '../services/whatsapp';
-import type { Conversation, Message, Client } from '../types';
+import type { Conversation, Message, Client, Reminder, ReminderStatus } from '../types';
+
+// Status configuration for display and actions
+const STATUS_CONFIG: Record<string, { 
+  label: string; 
+  color: string; 
+  bgColor: string;
+  icon: string;
+}> = {
+  New: { label: 'Nouveau', color: 'text-purple-700', bgColor: 'bg-purple-100', icon: '🆕' },
+  Pending: { label: 'En attente', color: 'text-amber-700', bgColor: 'bg-amber-100', icon: '⏳' },
+  Reminder1_sent: { label: 'Relance J-30', color: 'text-blue-700', bgColor: 'bg-blue-100', icon: '📤' },
+  Reminder2_sent: { label: 'Relance J-15', color: 'text-blue-700', bgColor: 'bg-blue-200', icon: '📤' },
+  Reminder3_sent: { label: 'Relance J-7', color: 'text-blue-700', bgColor: 'bg-blue-300', icon: '📤' },
+  Onhold: { label: 'En attente agent', color: 'text-orange-700', bgColor: 'bg-orange-100', icon: '⏸️' },
+  To_be_called: { label: 'À appeler', color: 'text-red-700', bgColor: 'bg-red-100', icon: '📞' },
+  To_be_contacted: { label: 'À recontacter', color: 'text-pink-700', bgColor: 'bg-pink-100', icon: '🔔' },
+  Appointment_confirmed: { label: 'RDV Confirmé', color: 'text-green-700', bgColor: 'bg-green-100', icon: '✅' },
+  Closed: { label: 'Fermé', color: 'text-gray-700', bgColor: 'bg-gray-100', icon: '❌' },
+  Completed: { label: 'Terminé', color: 'text-emerald-700', bgColor: 'bg-emerald-100', icon: '🏁' },
+};
+
+// Actions available for each status
+const STATUS_ACTIONS: Record<string, ReminderStatus[]> = {
+  Onhold: ['Appointment_confirmed', 'To_be_contacted', 'Pending', 'Closed'],
+  To_be_called: ['Appointment_confirmed', 'To_be_contacted', 'Closed'],
+  To_be_contacted: ['Appointment_confirmed', 'Closed'],
+  New: ['Onhold', 'Closed'],
+  Pending: ['Onhold', 'Closed'],
+  Reminder1_sent: ['Onhold', 'Appointment_confirmed', 'Closed'],
+  Reminder2_sent: ['Onhold', 'Appointment_confirmed', 'Closed'],
+  Reminder3_sent: ['Onhold', 'Appointment_confirmed', 'Closed'],
+  Appointment_confirmed: ['Completed', 'To_be_contacted'],
+};
 
 export default function Inbox() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [clientReminder, setClientReminder] = useState<Reminder | null>(null);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Auto-hide toast
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  // Fetch reminder for the selected client
+  const fetchClientReminder = useCallback(async (clientId: string) => {
+    const { data, error } = await supabase
+      .from('reminders')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+      console.error('Error fetching reminder:', error);
+    }
+    
+    setClientReminder(data || null);
+  }, []);
+
+  // Update reminder status
+  const updateReminderStatus = async (newStatus: ReminderStatus) => {
+    if (!clientReminder) return;
+
+    setUpdatingStatus(true);
+    try {
+      const { error } = await supabase
+        .from('reminders')
+        .update({ 
+          status: newStatus,
+          response_received_at: newStatus === 'Onhold' ? new Date().toISOString() : clientReminder.response_received_at,
+        })
+        .eq('id', clientReminder.id);
+
+      if (error) throw error;
+
+      setClientReminder(prev => prev ? { ...prev, status: newStatus } : null);
+      setToast({ type: 'success', message: `Statut mis à jour: ${STATUS_CONFIG[newStatus]?.label || newStatus}` });
+
+      // Also add a note about the status change
+      if (selectedConversation?.client_id) {
+        await supabase.from('client_notes').insert({
+          client_id: selectedConversation.client_id,
+          content: `Statut changé à "${STATUS_CONFIG[newStatus]?.label || newStatus}" depuis la messagerie`,
+          author: 'Agent',
+          note_type: 'system',
+        });
+      }
+    } catch (err) {
+      console.error('Error updating status:', err);
+      setToast({ type: 'error', message: 'Erreur lors de la mise à jour du statut' });
+    } finally {
+      setUpdatingStatus(false);
+    }
   };
 
   // Fetch all conversations
@@ -65,12 +162,21 @@ export default function Inbox() {
     fetchConversations();
   }, [fetchConversations]);
 
-  // Load messages when conversation is selected
+  // Load messages and reminder when conversation is selected
   useEffect(() => {
     if (selectedConversation) {
       fetchMessages(selectedConversation.id);
+      
+      // Fetch reminder if client is linked
+      if (selectedConversation.client_id) {
+        fetchClientReminder(selectedConversation.client_id);
+      } else {
+        setClientReminder(null);
+      }
+    } else {
+      setClientReminder(null);
     }
-  }, [selectedConversation, fetchMessages]);
+  }, [selectedConversation, fetchMessages, fetchClientReminder]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -233,7 +339,31 @@ export default function Inbox() {
   };
 
   return (
-    <div className="flex h-full bg-[#efeae2] dark:bg-background-dark/50">
+    <div className="flex h-full bg-[#efeae2] dark:bg-background-dark/50 relative">
+      {/* Toast Notification */}
+      {toast && (
+        <div 
+          className={`fixed top-6 right-6 z-50 px-6 py-4 rounded-xl shadow-2xl transform transition-all duration-300 ${
+            toast.type === 'success' 
+              ? 'bg-green-500 text-white' 
+              : 'bg-red-500 text-white'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <span className="material-symbols-outlined">
+              {toast.type === 'success' ? 'check_circle' : 'error'}
+            </span>
+            <span className="font-medium">{toast.message}</span>
+            <button 
+              onClick={() => setToast(null)}
+              className="ml-2 hover:opacity-70 transition-opacity"
+            >
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Conversations List */}
       <aside className="w-[360px] flex-none bg-white dark:bg-surface-dark border-r border-slate-200 dark:border-slate-800 flex flex-col">
         <div className="p-4 border-b border-slate-100 dark:border-slate-800">
@@ -433,7 +563,7 @@ export default function Inbox() {
         </div>
       )}
 
-      {/* Right Sidebar - Client Info */}
+      {/* Right Sidebar - Client Info & Status */}
       {selectedConversation && selectedConversation.client && (
         <aside className="w-[320px] flex-none bg-white dark:bg-surface-dark border-l border-slate-200 dark:border-slate-800 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
           <div className="text-center">
@@ -443,6 +573,64 @@ export default function Inbox() {
             <h3 className="font-bold text-lg">{selectedConversation.client.name || 'Client'}</h3>
             <p className="text-sm text-slate-500">{selectedConversation.client_phone}</p>
           </div>
+
+          {/* Reminder Status Section */}
+          {clientReminder && (
+            <div className="space-y-3">
+              <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Statut du dossier</h4>
+              <div className={`p-4 rounded-xl border-2 ${STATUS_CONFIG[clientReminder.status]?.bgColor || 'bg-slate-100'} ${STATUS_CONFIG[clientReminder.status]?.color || 'text-slate-700'} border-current/20`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">{STATUS_CONFIG[clientReminder.status]?.icon || '📋'}</span>
+                  <span className="font-bold">{STATUS_CONFIG[clientReminder.status]?.label || clientReminder.status}</span>
+                </div>
+                
+                {/* Due date */}
+                <div className="text-xs opacity-80">
+                  Échéance: {new Date(clientReminder.due_date).toLocaleDateString('fr-FR', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric'
+                  })}
+                </div>
+
+                {/* Last reminder info */}
+                {clientReminder.last_reminder_sent && (
+                  <div className="text-xs opacity-80 mt-1">
+                    Dernière relance: {clientReminder.last_reminder_sent}
+                  </div>
+                )}
+              </div>
+
+              {/* Status Change Actions */}
+              {STATUS_ACTIONS[clientReminder.status] && STATUS_ACTIONS[clientReminder.status].length > 0 && (
+                <div className="space-y-2">
+                  <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Changer le statut</h5>
+                  <div className="flex flex-wrap gap-2">
+                    {STATUS_ACTIONS[clientReminder.status].map(targetStatus => (
+                      <button
+                        key={targetStatus}
+                        onClick={() => updateReminderStatus(targetStatus)}
+                        disabled={updatingStatus}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 ${STATUS_CONFIG[targetStatus]?.bgColor || 'bg-slate-100'} ${STATUS_CONFIG[targetStatus]?.color || 'text-slate-700'} hover:opacity-80`}
+                      >
+                        {updatingStatus ? '...' : `${STATUS_CONFIG[targetStatus]?.icon} ${STATUS_CONFIG[targetStatus]?.label}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* No reminder warning */}
+          {!clientReminder && selectedConversation.client_id && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 text-amber-700">
+                <span className="material-symbols-outlined text-sm">warning</span>
+                <span className="text-xs font-medium">Aucun dossier de rappel trouvé pour ce client</span>
+              </div>
+            </div>
+          )}
 
           {selectedConversation.client.vehicle && (
             <div className="space-y-3">
@@ -484,6 +672,27 @@ export default function Inbox() {
               </div>
             </div>
           )}
+
+          {/* Quick Actions */}
+          <div className="space-y-3 mt-auto">
+            <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Actions rapides</h4>
+            <div className="flex flex-col gap-2">
+              <a 
+                href={`/clients/${selectedConversation.client_id}`}
+                className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 transition-all"
+              >
+                <span className="material-symbols-outlined text-sm">person</span>
+                Voir fiche client
+              </a>
+              <a 
+                href={`tel:+${selectedConversation.client_phone}`}
+                className="flex items-center gap-2 px-4 py-2 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200 transition-all"
+              >
+                <span className="material-symbols-outlined text-sm">call</span>
+                Appeler le client
+              </a>
+            </div>
+          </div>
         </aside>
       )}
     </div>

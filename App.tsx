@@ -83,13 +83,13 @@ const Sidebar = () => {
           <span className="material-symbols-outlined">dashboard</span>
           <span className="text-sm">Dashboard</span>
         </Link>
-        <Link to="/inbox" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive('/inbox') ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-          <span className="material-symbols-outlined">inbox</span>
-          <span className="text-sm">Messages</span>
-        </Link>
         <Link to="/todo" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive('/todo') ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
           <span className="material-symbols-outlined">checklist</span>
           <span className="text-sm">Todo List</span>
+        </Link>
+        <Link to="/inbox" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive('/inbox') ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+          <span className="material-symbols-outlined">inbox</span>
+          <span className="text-sm">Messages</span>
         </Link>
         
         {/* Admin only sections */}
