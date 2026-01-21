@@ -87,11 +87,22 @@ export default function Inbox() {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const newMessage = payload.new as Message;
-          console.log('📩 New message received:', newMessage);
+          console.log('📩 New message received via realtime:', newMessage);
           
-          // If it's for the current conversation, add it
+          // If it's for the current conversation, add it (avoid duplicates)
           if (selectedConversation && newMessage.conversation_id === selectedConversation.id) {
-            setMessages(prev => [...prev, newMessage]);
+            setMessages(prev => {
+              // Check if message already exists (by id or wa_message_id)
+              const exists = prev.some(m => 
+                m.id === newMessage.id || 
+                (m.wa_message_id && m.wa_message_id === newMessage.wa_message_id)
+              );
+              if (exists) {
+                console.log('⏭️ Message already exists, skipping duplicate');
+                return prev;
+              }
+              return [...prev, newMessage];
+            });
           }
           
           // Refresh conversations list
