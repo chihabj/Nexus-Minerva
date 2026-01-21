@@ -11,10 +11,10 @@ const GRAPH_API_VERSION = 'v17.0';
 const GRAPH_API_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}/${WHATSAPP_PHONE_ID}/messages`;
 
 /**
- * 🚫 FLAG TEMPORAIRE - Désactive les appels WhatsApp API
- * Mettre à true une fois la nouvelle app Meta configurée
+ * ✅ WhatsApp API activée
+ * Configurée avec le nouveau numéro Minerva Controle Technique
  */
-const WHATSAPP_ENABLED = false;
+const WHATSAPP_ENABLED = true;
 
 /**
  * Vérifie si WhatsApp est activé et configuré
