@@ -11,9 +11,12 @@ export default function Clients() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Fetch clients from Supabase
+  // Fetch clients from Supabase - OPTIMIZED
   useEffect(() => {
     async function fetchClients() {
+      const startTime = performance.now();
+      console.log('[Clients] Fetching...');
+      
       try {
         setLoading(true);
         setError(null);
@@ -24,9 +27,11 @@ export default function Clients() {
           .order('created_at', { ascending: false });
 
         if (error) throw error;
+        
+        console.log('[Clients] Loaded', data?.length, 'clients in', Math.round(performance.now() - startTime), 'ms');
         setClients(data || []);
       } catch (err) {
-        console.error('Error fetching clients:', err);
+        console.error('[Clients] Error:', err);
         setError(err instanceof Error ? err.message : 'Failed to load clients');
       } finally {
         setLoading(false);

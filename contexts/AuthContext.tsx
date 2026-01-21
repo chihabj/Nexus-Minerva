@@ -118,91 +118,69 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Initialize auth state
+  // Helper to create profile from user metadata (instant, no DB call)
+  const createProfileFromMetadata = (user: User): UserProfile => ({
+    id: user.id,
+    email: user.email || '',
+    full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Utilisateur',
+    role: user.user_metadata?.role || 'agent',
+    avatar_url: null,
+    center_id: null,
+    is_active: true,
+    last_login: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  // Initialize auth state - OPTIMIZED for speed
   useEffect(() => {
     let mounted = true;
-    let profileLoaded = false;
 
     const initAuth = async () => {
+      const startTime = performance.now();
+      console.log('[Auth] Initializing...');
+      
       try {
-        console.log('[Auth] Initializing...');
-        
         // Get initial session
         const { data: { session } } = await supabase.auth.getSession();
         
         if (!mounted) return;
         
-        console.log('[Auth] Session:', session?.user?.email || 'No session');
-        
         setSession(session);
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          // Try to load profile from metadata first (instant)
-          const metadataProfile: UserProfile = {
-            id: session.user.id,
-            email: session.user.email || '',
-            full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Utilisateur',
-            role: session.user.user_metadata?.role || 'agent',
-            avatar_url: null,
-            center_id: null,
-            is_active: true,
-            last_login: null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-          
-          // Set profile immediately from metadata
-          console.log('[Auth] Setting initial profile from metadata:', metadataProfile.full_name, metadataProfile.role);
+          // Set profile IMMEDIATELY from metadata (no waiting for DB)
+          const metadataProfile = createProfileFromMetadata(session.user);
+          console.log('[Auth] Profile from metadata:', metadataProfile.full_name, metadataProfile.role);
           setProfile(metadataProfile);
-          profileLoaded = true;
           
-          // Then try to fetch the full profile from DB (async, might have more data)
-          fetchProfile(
-            session.user.id,
-            session.user.email,
-            session.user.user_metadata
-          ).then(dbProfile => {
-            if (mounted && dbProfile) {
-              console.log('[Auth] Updating profile from DB:', dbProfile.full_name, dbProfile.role);
-              setProfile(dbProfile);
-              
-              // Update last_login silently
-              supabase
-                .from('user_profiles')
-                .update({ last_login: new Date().toISOString() })
-                .eq('id', session.user.id)
-                .then(() => {})
-                .catch(() => {});
-            }
-          }).catch(err => {
-            console.warn('[Auth] DB profile fetch failed, using metadata profile:', err);
-          });
+          // Fetch DB profile in background (non-blocking)
+          fetchProfile(session.user.id, session.user.email, session.user.user_metadata)
+            .then(dbProfile => {
+              if (mounted && dbProfile) {
+                setProfile(dbProfile);
+              }
+            })
+            .catch(() => {}); // Silent fail, we have metadata profile
         }
+        
+        console.log('[Auth] Init complete in', Math.round(performance.now() - startTime), 'ms');
       } catch (error) {
         console.error('[Auth] Initialization error:', error);
       } finally {
         if (mounted) {
-          console.log('[Auth] Init complete, setting loading false');
           setLoading(false);
         }
       }
     };
 
-    // Start auth initialization
+    // Start immediately
     initAuth();
 
-    // Set a failsafe timeout (only as last resort)
-    const timeout = setTimeout(() => {
-      if (mounted && loading) {
-        console.warn('[Auth] Timeout triggered - forcing loading complete');
-        setLoading(false);
-      }
-    }, 8000); // Increased to 8s
-
-    // Listen for auth changes
+    // Listen for auth changes (login/logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         console.log('[Auth] Auth state changed:', event);
         if (!mounted) return;
         
@@ -210,30 +188,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session?.user ?? null);
         
         if (session?.user) {
-          // Set profile from metadata immediately
-          const metadataProfile: UserProfile = {
-            id: session.user.id,
-            email: session.user.email || '',
-            full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Utilisateur',
-            role: session.user.user_metadata?.role || 'agent',
-            avatar_url: null,
-            center_id: null,
-            is_active: true,
-            last_login: null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-          setProfile(metadataProfile);
+          // Set profile immediately from metadata
+          setProfile(createProfileFromMetadata(session.user));
           
-          // Then fetch full profile
-          const userProfile = await fetchProfile(
-            session.user.id,
-            session.user.email,
-            session.user.user_metadata
-          );
-          if (mounted && userProfile) {
-            setProfile(userProfile);
-          }
+          // Fetch full profile in background
+          fetchProfile(session.user.id, session.user.email, session.user.user_metadata)
+            .then(dbProfile => {
+              if (mounted && dbProfile) setProfile(dbProfile);
+            })
+            .catch(() => {});
         } else {
           setProfile(null);
         }
@@ -244,7 +207,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       mounted = false;
-      clearTimeout(timeout);
       subscription.unsubscribe();
     };
   }, []);

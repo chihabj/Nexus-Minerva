@@ -54,66 +54,52 @@ export default function Dashboard() {
     }
   };
 
-  // Fetch reminders and stats from Supabase
+  // Fetch reminders and stats from Supabase - OPTIMIZED with parallel queries
   const fetchData = useCallback(async () => {
     console.log('[Dashboard] Fetching data...');
+    const startTime = performance.now();
+    
     try {
       setLoading(true);
       setError(null);
       
       const today = new Date().toISOString().split('T')[0];
       
-      // Add timeout
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      // Execute ALL queries in PARALLEL using Promise.all
+      const [
+        remindersResult,
+        clientsCountResult,
+        remindersCountResult,
+        readyCountResult,
+        pendingCountResult,
+        sentCountResult,
+      ] = await Promise.all([
+        // Main reminders query with client join
+        supabase
+          .from('reminders')
+          .select('*, clients (*)')
+          .order('due_date', { ascending: true }),
+        
+        // Stats queries - all in parallel
+        supabase.from('clients').select('*', { count: 'exact', head: true }),
+        supabase.from('reminders').select('*', { count: 'exact', head: true }),
+        supabase.from('reminders').select('*', { count: 'exact', head: true }).eq('status', 'Ready'),
+        supabase.from('reminders').select('*', { count: 'exact', head: true }).eq('status', 'Pending'),
+        supabase.from('reminders').select('*', { count: 'exact', head: true }).eq('status', 'Sent').gte('updated_at', today),
+      ]);
+
+      // Check for errors
+      if (remindersResult.error) throw remindersResult.error;
       
-      // Fetch ALL reminders, sorted by due_date ASC
-      const { data: reminderData, error: reminderError } = await supabase
-        .from('reminders')
-        .select(`
-          *,
-          clients (*)
-        `)
-        .order('due_date', { ascending: true })
-        .abortSignal(controller.signal);
-
-      clearTimeout(timeoutId);
+      console.log('[Dashboard] Loaded', remindersResult.data?.length, 'reminders in', Math.round(performance.now() - startTime), 'ms');
       
-      if (reminderError) throw reminderError;
-      console.log('[Dashboard] Loaded', reminderData?.length, 'reminders');
-      setReminders(reminderData || []);
-
-      // Fetch stats
-      const { count: totalClients } = await supabase
-        .from('clients')
-        .select('*', { count: 'exact', head: true });
-
-      const { count: totalReminders } = await supabase
-        .from('reminders')
-        .select('*', { count: 'exact', head: true });
-
-      const { count: readyCount } = await supabase
-        .from('reminders')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'Ready');
-
-      const { count: pendingCount } = await supabase
-        .from('reminders')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'Pending');
-
-      const { count: sentCount } = await supabase
-        .from('reminders')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'Sent')
-        .gte('updated_at', today);
-
+      setReminders(remindersResult.data || []);
       setStats({
-        totalClients: totalClients || 0,
-        totalReminders: totalReminders || 0,
-        readyReminders: readyCount || 0,
-        pendingReminders: pendingCount || 0,
-        sentToday: sentCount || 0,
+        totalClients: clientsCountResult.count || 0,
+        totalReminders: remindersCountResult.count || 0,
+        readyReminders: readyCountResult.count || 0,
+        pendingReminders: pendingCountResult.count || 0,
+        sentToday: sentCountResult.count || 0,
       });
     } catch (err) {
       console.error('Error fetching data:', err);
