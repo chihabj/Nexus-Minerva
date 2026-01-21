@@ -7,6 +7,7 @@ import ImportData from './views/ImportData';
 import Centers from './views/Centers';
 import Clients from './views/Clients';
 import ClientDetails from './views/ClientDetails';
+import TodoList from './views/TodoList';
 import Login from './views/Login';
 import Settings from './views/Settings';
 import { supabase } from './services/supabaseClient';
@@ -85,6 +86,10 @@ const Sidebar = () => {
         <Link to="/inbox" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive('/inbox') ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
           <span className="material-symbols-outlined">inbox</span>
           <span className="text-sm">Messages</span>
+        </Link>
+        <Link to="/todo" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive('/todo') ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+          <span className="material-symbols-outlined">checklist</span>
+          <span className="text-sm">Todo List</span>
         </Link>
         
         {/* Admin only sections */}
@@ -303,6 +308,7 @@ function AppContent() {
           <Routes>
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/inbox" element={<ProtectedRoute><Inbox /></ProtectedRoute>} />
+            <Route path="/todo" element={<ProtectedRoute><TodoList /></ProtectedRoute>} />
             <Route path="/import" element={<ProtectedRoute allowedRoles={['admin']}><ImportData /></ProtectedRoute>} />
             <Route path="/clients" element={<ProtectedRoute><Clients /></ProtectedRoute>} />
             <Route path="/clients/:id" element={<ProtectedRoute><ClientDetails /></ProtectedRoute>} />

@@ -2,7 +2,19 @@
 // DATABASE TYPES (matching Supabase schema)
 // ===========================================
 
-export type ReminderStatus = 'Ready' | 'Pending' | 'Sent' | 'Failed' | 'Resolved' | 'Reminder_1' | 'Reminder_2' | 'Reminder_3' | 'Call_Required' | 'Completed' | 'Expired';
+// Workflow statuses for reminders
+export type ReminderStatus = 
+  | 'New'                    // Nouveau client importé
+  | 'Pending'                // En attente de réponse client (manuel)
+  | 'Reminder1_sent'         // Relance J-30 envoyée
+  | 'Reminder2_sent'         // Relance J-15 envoyée
+  | 'Reminder3_sent'         // Relance J-7 envoyée
+  | 'Onhold'                 // Client a répondu, attente action agent
+  | 'To_be_called'           // J-3 sans réponse, appel requis
+  | 'To_be_contacted'        // Client demande à être rappelé
+  | 'Appointment_confirmed'  // RDV confirmé
+  | 'Closed'                 // Dossier fermé
+  | 'Completed';             // Visite effectuée (futur)
 export type NoteType = 'note' | 'call' | 'appointment' | 'system';
 export type MessageSender = 'user' | 'agent' | 'system';
 export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
@@ -36,13 +48,18 @@ export interface Client {
 export interface Reminder {
   id: string;
   created_at: string;
+  updated_at: string;
   client_id: string;
   due_date: string;           // Date d'échéance (last_visit + 2 ans)
   reminder_date: string;      // Date d'envoi (due_date - 30 jours)
   status: ReminderStatus;
   message: string | null;
   message_template: string | null;
-  sent_at: string | null;
+  // Workflow tracking
+  last_reminder_sent: 'J30' | 'J15' | 'J7' | null;  // Dernière relance envoyée
+  last_reminder_at: string | null;                   // Date de la dernière relance
+  response_received_at: string | null;               // Date de réponse client
+  agent_notes: string | null;                        // Notes de l'agent
   // Joined fields from clients
   client?: Client;
 }

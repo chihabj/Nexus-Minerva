@@ -31,20 +31,26 @@ export default function Dashboard() {
     }
   }, [toast]);
 
-  // Reset all reminders to Pending (for testing)
+  // Reset all reminders to New (for testing)
   const handleResetForTesting = async () => {
-    if (!confirm('⚠️ Réinitialiser tous les statuts à "Pending" pour les tests ?')) return;
+    if (!confirm('⚠️ Réinitialiser tous les statuts à "New" pour les tests ?')) return;
     
     setResetting(true);
     try {
       const { error } = await supabase
         .from('reminders')
-        .update({ status: 'Pending', sent_at: null, message: null })
+        .update({ 
+          status: 'New', 
+          last_reminder_sent: null, 
+          last_reminder_at: null,
+          response_received_at: null,
+          agent_notes: null,
+        })
         .neq('id', '00000000-0000-0000-0000-000000000000'); // Update all
       
       if (error) throw error;
       
-      setToast({ type: 'success', message: '🔄 Tous les statuts réinitialisés à Pending' });
+      setToast({ type: 'success', message: '🔄 Tous les statuts réinitialisés à New' });
       fetchData(); // Refresh data
     } catch (err) {
       console.error('Reset error:', err);
@@ -70,8 +76,8 @@ export default function Dashboard() {
         remindersResult,
         clientsCountResult,
         remindersCountResult,
-        readyCountResult,
-        pendingCountResult,
+        newCountResult,
+        actionRequiredCountResult,
         sentCountResult,
       ] = await Promise.all([
         // Main reminders query with client join
@@ -80,12 +86,15 @@ export default function Dashboard() {
           .select('*, clients (*)')
           .order('due_date', { ascending: true }),
         
-        // Stats queries - all in parallel
+        // Stats queries - all in parallel (updated for new workflow)
         supabase.from('clients').select('*', { count: 'exact', head: true }),
         supabase.from('reminders').select('*', { count: 'exact', head: true }),
-        supabase.from('reminders').select('*', { count: 'exact', head: true }).eq('status', 'Ready'),
-        supabase.from('reminders').select('*', { count: 'exact', head: true }).eq('status', 'Pending'),
-        supabase.from('reminders').select('*', { count: 'exact', head: true }).eq('status', 'Sent').gte('updated_at', today),
+        // Count 'New' status (ready for first reminder)
+        supabase.from('reminders').select('*', { count: 'exact', head: true }).eq('status', 'New'),
+        // Count action required statuses (Onhold + To_be_called + To_be_contacted)
+        supabase.from('reminders').select('*', { count: 'exact', head: true }).in('status', ['Onhold', 'To_be_called', 'To_be_contacted']),
+        // Count reminders sent in any stage today
+        supabase.from('reminders').select('*', { count: 'exact', head: true }).not('last_reminder_sent', 'is', null).gte('last_reminder_at', today),
       ]);
 
       // Check for errors
@@ -97,8 +106,8 @@ export default function Dashboard() {
       setStats({
         totalClients: clientsCountResult.count || 0,
         totalReminders: remindersCountResult.count || 0,
-        readyReminders: readyCountResult.count || 0,
-        pendingReminders: pendingCountResult.count || 0,
+        readyReminders: newCountResult.count || 0,  // New clients ready for first reminder
+        pendingReminders: actionRequiredCountResult.count || 0,  // Action required (Onhold, To_be_called, To_be_contacted)
         sentToday: sentCountResult.count || 0,
       });
     } catch (err) {
@@ -213,8 +222,20 @@ export default function Dashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Ready': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+      // New workflow statuses
+      case 'New': return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400';
       case 'Pending': return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400';
+      case 'Reminder1_sent': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+      case 'Reminder2_sent': return 'bg-blue-200 text-blue-800 dark:bg-blue-900/40 dark:text-blue-400';
+      case 'Reminder3_sent': return 'bg-blue-300 text-blue-900 dark:bg-blue-900/50 dark:text-blue-300';
+      case 'Onhold': return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
+      case 'To_be_called': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+      case 'To_be_contacted': return 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400';
+      case 'Appointment_confirmed': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+      case 'Closed': return 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400';
+      case 'Completed': return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
+      // Legacy statuses
+      case 'Ready': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
       case 'Sent': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
       case 'Failed': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
       default: return 'bg-slate-100 text-slate-700';
@@ -282,14 +303,14 @@ export default function Dashboard() {
           
           <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <span className="material-symbols-outlined text-green-500 bg-green-50 dark:bg-green-900/20 p-2 rounded-lg">notification_important</span>
+              <span className="material-symbols-outlined text-purple-500 bg-purple-50 dark:bg-purple-900/20 p-2 rounded-lg">fiber_new</span>
               {stats.readyReminders > 0 && (
-                <span className="text-xs font-medium text-green-600 bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded-full animate-pulse">
-                  À traiter
+                <span className="text-xs font-medium text-purple-600 bg-purple-50 dark:bg-purple-900/20 px-2 py-0.5 rounded-full">
+                  Nouveaux
                 </span>
               )}
             </div>
-            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Relances Prêtes</p>
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Nouveaux Clients</p>
             <h3 className="text-3xl font-bold mt-1">{stats.readyReminders}</h3>
           </div>
           
@@ -303,9 +324,14 @@ export default function Dashboard() {
           
           <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <span className="material-symbols-outlined text-amber-500 bg-amber-50 dark:bg-amber-900/20 p-2 rounded-lg">schedule</span>
+              <span className="material-symbols-outlined text-red-500 bg-red-50 dark:bg-red-900/20 p-2 rounded-lg">priority_high</span>
+              {stats.pendingReminders > 0 && (
+                <a href="#/todo" className="text-xs font-medium text-red-600 bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded-full animate-pulse hover:underline">
+                  Voir →
+                </a>
+              )}
             </div>
-            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">En Attente</p>
+            <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">Actions Requises</p>
             <h3 className="text-3xl font-bold mt-1">{stats.pendingReminders}</h3>
           </div>
         </div>

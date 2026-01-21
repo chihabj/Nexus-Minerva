@@ -171,7 +171,14 @@ function isAppointmentConfirmation(content: string): boolean {
 }
 
 /**
- * Find client and update reminder status if appointment is confirmed
+ * NEW WORKFLOW STATUS:
+ * - Any client response → status becomes 'Onhold' (stops automated reminders)
+ * - Agent manually decides: Appointment_confirmed, To_be_contacted, Closed
+ */
+
+/**
+ * Find client and update reminder status when client responds
+ * ANY response puts the reminder on hold for agent review
  */
 async function handleClientResponse(phone: string, content: string, clientId: string | null) {
   const cleanPhone = phone.startsWith('+') ? phone.substring(1) : phone;
@@ -193,47 +200,48 @@ async function handleClientResponse(phone: string, content: string, clientId: st
     return;
   }
   
-  // Check if this looks like an appointment confirmation
-  if (isAppointmentConfirmation(content)) {
-    console.log('🎉 Appointment confirmation detected!');
+  // ANY response puts the reminder on hold
+  // Statuses that should be put on hold (active workflow statuses)
+  const activeStatuses = ['New', 'Pending', 'Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent', 'To_be_called'];
+  
+  console.log('📬 Client response received, setting reminders to Onhold...');
+  
+  // Update all active reminders for this client to Onhold
+  const { data: updatedReminders, error } = await supabase
+    .from('reminders')
+    .update({ 
+      status: 'Onhold',
+      response_received_at: new Date().toISOString(),
+    })
+    .eq('client_id', actualClientId)
+    .in('status', activeStatuses)
+    .select();
+  
+  if (error) {
+    console.error('Error updating reminders to Onhold:', error);
+  } else if (updatedReminders && updatedReminders.length > 0) {
+    console.log(`✅ Set ${updatedReminders.length} reminders to Onhold`);
     
-    // Update all pending reminders for this client to Resolved
-    const { data: updatedReminders, error } = await supabase
-      .from('reminders')
-      .update({ 
-        status: 'Resolved',
-        call_required: false,
-      })
-      .eq('client_id', actualClientId)
-      .not('status', 'in', '("Resolved","Completed","Expired")')
-      .select();
-    
-    if (error) {
-      console.error('Error updating reminders:', error);
-    } else if (updatedReminders && updatedReminders.length > 0) {
-      console.log(`✅ Marked ${updatedReminders.length} reminders as Resolved`);
-      
-      // Log the response in reminder_logs
-      for (const reminder of updatedReminders) {
-        await supabase.from('reminder_logs').insert({
-          reminder_id: reminder.id,
-          action_type: 'whatsapp',
-          status: 'delivered',
-          response_received: true,
-          response_text: content.substring(0, 500), // Truncate if too long
-        });
-      }
-      
-      // Create notification for admins
-      await createNotificationForAdmins(
-        '✅ RDV Confirmé',
-        `Le client a confirmé son rendez-vous. Message: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`,
-        'success',
-        `/clients/${actualClientId}`
-      );
+    // Log the response in reminder_logs
+    for (const reminder of updatedReminders) {
+      await supabase.from('reminder_logs').insert({
+        reminder_id: reminder.id,
+        action_type: 'whatsapp',
+        status: 'delivered',
+        response_received: true,
+        response_text: content.substring(0, 500),
+      });
     }
+    
+    // Create notification for agents - action required
+    await createNotificationForAdmins(
+      '⏸️ Réponse client - Action requise',
+      `Le client a répondu: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}" - Veuillez traiter ce dossier.`,
+      'action_required',
+      `/clients/${actualClientId}`
+    );
   } else {
-    // Still create a notification for any response
+    // No active reminders found, just notify
     await createNotificationForAdmins(
       '💬 Réponse client',
       `Nouveau message du client: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`,

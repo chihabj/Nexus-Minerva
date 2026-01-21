@@ -350,7 +350,7 @@ export function useImportProcess() {
         
         try {
           const client: any = {
-            status: 'Pending' as const,
+            status: 'New' as const, // New workflow status for newly imported clients
           };
 
           // Map each field
@@ -439,10 +439,9 @@ export function useImportProcess() {
             inserted += insertedClients.length;
             
             // Create reminders for each inserted client (2-year rule)
+            // All new imports start with 'New' status, cron job will process them at J-30
             const remindersToInsert = insertedClients.map(client => {
               const lastVisit = new Date(client.last_visit);
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
               
               // Calculate next visit = last_visit + 2 years
               const nextVisit = new Date(lastVisit);
@@ -456,20 +455,19 @@ export function useImportProcess() {
               reminderDate.setDate(reminderDate.getDate() - 30);
               const reminderDateStr = reminderDate.toISOString().split('T')[0];
               
-              // If last_visit > 2 years ago (overdue), status = 'Ready' for immediate action
-              // Otherwise status = 'Pending'
-              const twoYearsAgo = new Date(today);
-              twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
-              const isOverdue = lastVisit < twoYearsAgo;
+              // NEW WORKFLOW: All new imports start with 'New' status
+              // The cron job will process them when:
+              // - J-30: New → Reminder1_sent (send WhatsApp)
+              // - J-15: Reminder1_sent → Reminder2_sent
+              // - J-7: Reminder2_sent → Reminder3_sent
+              // - J-3: Reminder3_sent → To_be_called
               
               return {
                 client_id: client.id,
                 due_date: dueDate,
                 reminder_date: reminderDateStr,
-                status: isOverdue ? 'Ready' : 'Pending',
-                message_template: isOverdue 
-                  ? 'Votre visite technique est en retard. Merci de prendre rendez-vous rapidement.'
-                  : 'Votre prochaine visite technique est prévue bientôt. Pensez à prendre rendez-vous.',
+                status: 'New', // Always start with 'New' status
+                message_template: 'rappel_visite_technique_vf',
               };
             });
             
