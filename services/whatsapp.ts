@@ -177,12 +177,16 @@ export async function sendWhatsAppTemplate({
 }
 
 /**
- * Envoie le template "rappel_visite_technique" avec les variables du client
+ * Envoie le template "rappel_visite_technique_vf" avec les variables du client
  * 
  * Variables du template:
- * - {{1}} = Nom du client
- * - {{2}} = Véhicule
- * - {{3}} = Date d'échéance
+ * - {{1}} = Nom du client (ex: "Jean")
+ * - {{2}} = Véhicule (ex: "Peugeot 308")
+ * - {{3}} = Date d'échéance (ex: "15/02/2026")
+ * 
+ * Boutons Quick Reply:
+ * - "prendre RDV"
+ * - "être rappelé"
  */
 export async function sendRappelVisiteTechnique({
   to,
@@ -204,7 +208,7 @@ export async function sendRappelVisiteTechnique({
 
   return sendWhatsAppTemplate({
     to,
-    templateName: 'rappel_visite_technique',
+    templateName: 'rappel_visite_technique_vf',
     languageCode: 'fr',
     components,
   });
