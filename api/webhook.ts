@@ -27,8 +27,14 @@ interface WhatsAppMessage {
   from: string;
   id: string;
   timestamp: string;
-  type: 'text' | 'image' | 'document' | 'audio' | 'video' | 'location' | 'reaction' | 'sticker';
+  type: 'text' | 'image' | 'document' | 'audio' | 'video' | 'location' | 'reaction' | 'sticker' | 'button' | 'interactive';
   text?: { body: string };
+  button?: { text: string; payload: string }; // Quick Reply button click
+  interactive?: { 
+    type: string;
+    button_reply?: { id: string; title: string }; // Interactive button reply
+    list_reply?: { id: string; title: string; description?: string }; // List reply
+  };
   image?: { id: string; mime_type: string; sha256: string; caption?: string };
   document?: { id: string; mime_type: string; sha256: string; filename: string; caption?: string };
   audio?: { id: string; mime_type: string };
@@ -274,7 +280,18 @@ async function saveIncomingMessage(
   contactName?: string,
   clientId?: string | null
 ) {
-  const messageContent = message.text?.body || message.image?.caption || message.document?.caption || message.video?.caption || null;
+  // Extract message content from various message types
+  const messageContent = 
+    message.text?.body ||                           // Regular text message
+    message.button?.text ||                         // Quick Reply button click
+    message.interactive?.button_reply?.title ||     // Interactive button reply
+    message.interactive?.list_reply?.title ||       // List reply
+    message.image?.caption || 
+    message.document?.caption || 
+    message.video?.caption || 
+    null;
+  
+  console.log('📝 Extracting content from message type:', message.type, '| Content:', messageContent);
   
   const messageData = {
     conversation_id: conversationId,
@@ -311,10 +328,28 @@ async function saveIncomingMessage(
 
   console.log('✅ Message saved:', data.id);
   
+  // Update conversation with last message
+  await supabase
+    .from('conversations')
+    .update({ 
+      last_message: messageContent?.substring(0, 100) || `[${message.type}]`,
+      last_message_at: new Date().toISOString(),
+      unread_count: 1
+    })
+    .eq('id', conversationId);
+  
   // Process the response for appointment detection
   if (messageContent) {
     await handleClientResponse(message.from, messageContent, clientId || null);
   }
+  
+  // Create notification for all admins
+  await createNotificationForAdmins(
+    '💬 Nouveau message WhatsApp',
+    `${contactName || message.from}: ${messageContent?.substring(0, 50) || `[${message.type}]`}`,
+    'info',
+    '/inbox'
+  );
   
   return data;
 }
