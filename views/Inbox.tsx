@@ -109,7 +109,7 @@ export default function Inbox() {
         ? { 
             ...prev, 
             status: newStatus,
-            response_received_at: newResponseReceivedAt, // Include the timestamp!
+            response_received_at: newResponseReceivedAt,
           } 
         : prev
       );
@@ -603,13 +603,13 @@ export default function Inbox() {
                 </div>
 
                 {/* Last reminder info */}
-                {clientReminder.last_reminder_sent && (
+                {clientReminder.current_step > 0 && (
                   <div className="text-xs opacity-80 mt-1">
-                    Dernière relance: {clientReminder.last_reminder_sent}
+                    Dernière relance: Étape {clientReminder.current_step}
                   </div>
                 )}
 
-                {/* Response received timestamp - BUG 1 FIX: Now properly updated */}
+                {/* Response received timestamp */}
                 {clientReminder.response_received_at && (
                   <div className="text-xs opacity-80 mt-1">
                     Réponse reçue: {new Date(clientReminder.response_received_at).toLocaleDateString('fr-FR', {
