@@ -26,6 +26,7 @@ export type MappingConfidence = 'High' | 'Low' | 'None';
 export type UserRole = 'superadmin' | 'admin' | 'agent';
 export type NotificationType = 'info' | 'warning' | 'error' | 'success' | 'action_required';
 export type ReminderActionType = 'whatsapp' | 'call' | 'email';
+export type MessageTemplateCategory = 'greeting' | 'confirmation' | 'reminder' | 'closing' | 'general';
 
 // Client table
 export interface Client {
@@ -184,6 +185,19 @@ export interface Notification {
   link: string | null;
   is_read: boolean;
   created_at: string;
+}
+
+// Message Template (pre-registered quick replies)
+export interface MessageTemplate {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  title: string;
+  content: string;
+  category: MessageTemplateCategory;
+  shortcut: string | null;
+  is_active: boolean;
+  sort_order: number;
 }
 
 // ===========================================

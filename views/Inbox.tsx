@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { sendTextMessage } from '../services/whatsapp';
-import type { Conversation, Message, Reminder, ReminderStatus } from '../types';
+import type { Conversation, Message, Reminder, ReminderStatus, MessageTemplate } from '../types';
 
 // Status configuration for display and actions
 const STATUS_CONFIG: Record<string, { 
@@ -12,13 +12,13 @@ const STATUS_CONFIG: Record<string, {
 }> = {
   New: { label: 'Nouveau', color: 'text-purple-700', bgColor: 'bg-purple-100', icon: '🆕' },
   Pending: { label: 'En attente', color: 'text-amber-700', bgColor: 'bg-amber-100', icon: '⏳' },
-  Reminder1_sent: { label: 'Relance J-30', color: 'text-blue-700', bgColor: 'bg-blue-100', icon: '📤' },
-  Reminder2_sent: { label: 'Relance J-15', color: 'text-blue-700', bgColor: 'bg-blue-200', icon: '📤' },
-  Reminder3_sent: { label: 'Relance J-7', color: 'text-blue-700', bgColor: 'bg-blue-300', icon: '📤' },
-  Onhold: { label: 'En attente agent', color: 'text-orange-700', bgColor: 'bg-orange-100', icon: '⏸️' },
+  Reminder1_sent: { label: 'J-30', color: 'text-blue-700', bgColor: 'bg-blue-100', icon: '📤' },
+  Reminder2_sent: { label: 'J-15', color: 'text-blue-700', bgColor: 'bg-blue-200', icon: '📤' },
+  Reminder3_sent: { label: 'J-7', color: 'text-blue-700', bgColor: 'bg-blue-300', icon: '📤' },
+  Onhold: { label: 'À traiter', color: 'text-orange-700', bgColor: 'bg-orange-100', icon: '⏸️' },
   To_be_called: { label: 'À appeler', color: 'text-red-700', bgColor: 'bg-red-100', icon: '📞' },
   To_be_contacted: { label: 'À recontacter', color: 'text-pink-700', bgColor: 'bg-pink-100', icon: '🔔' },
-  Appointment_confirmed: { label: 'RDV Confirmé', color: 'text-green-700', bgColor: 'bg-green-100', icon: '✅' },
+  Appointment_confirmed: { label: 'RDV OK', color: 'text-green-700', bgColor: 'bg-green-100', icon: '✅' },
   Closed: { label: 'Fermé', color: 'text-gray-700', bgColor: 'bg-gray-100', icon: '❌' },
   Completed: { label: 'Terminé', color: 'text-emerald-700', bgColor: 'bg-emerald-100', icon: '🏁' },
 };
@@ -36,6 +36,36 @@ const STATUS_ACTIONS: Record<string, ReminderStatus[]> = {
   Appointment_confirmed: ['Completed', 'To_be_contacted'],
 };
 
+// Filter categories for conversation list
+type FilterCategory = 'all' | 'action' | 'progress' | 'waiting' | 'resolved';
+const FILTER_CATEGORIES: Record<FilterCategory, { 
+  label: string; 
+  icon: string; 
+  statuses: ReminderStatus[] | null;
+}> = {
+  all: { label: 'Tous', icon: 'inbox', statuses: null },
+  action: { 
+    label: 'À traiter', 
+    icon: 'priority_high', 
+    statuses: ['Onhold', 'To_be_called', 'To_be_contacted'] 
+  },
+  progress: { 
+    label: 'En cours', 
+    icon: 'schedule', 
+    statuses: ['New', 'Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'] 
+  },
+  waiting: { 
+    label: 'En attente', 
+    icon: 'hourglass_empty', 
+    statuses: ['Pending'] 
+  },
+  resolved: { 
+    label: 'Résolus', 
+    icon: 'check_circle', 
+    statuses: ['Appointment_confirmed', 'Completed', 'Closed'] 
+  },
+};
+
 export default function Inbox() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
@@ -48,6 +78,12 @@ export default function Inbox() {
   const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // New state for filters, templates, and reminders map
+  const [statusFilter, setStatusFilter] = useState<FilterCategory>('all');
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [showQuickReplies, setShowQuickReplies] = useState(false);
+  const [conversationReminders, setConversationReminders] = useState<Record<string, Reminder>>({});
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -149,6 +185,52 @@ export default function Inbox() {
     setLoading(false);
   }, []);
 
+  // Fetch reminders for all conversations (to show status badges)
+  const fetchAllReminders = useCallback(async (convs: Conversation[]) => {
+    const clientIds = convs
+      .filter(c => c.client_id)
+      .map(c => c.client_id as string);
+    
+    if (clientIds.length === 0) return;
+
+    const { data, error } = await supabase
+      .from('reminders')
+      .select('*')
+      .in('client_id', clientIds)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching reminders:', error);
+      return;
+    }
+
+    // Group by client_id (keep most recent)
+    const reminderMap: Record<string, Reminder> = {};
+    (data as Reminder[] | null)?.forEach(reminder => {
+      if (!reminderMap[reminder.client_id]) {
+        reminderMap[reminder.client_id] = reminder;
+      }
+    });
+
+    setConversationReminders(reminderMap);
+  }, []);
+
+  // Fetch message templates
+  const fetchTemplates = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('message_templates')
+      .select('*')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching templates:', error);
+      return;
+    }
+
+    setTemplates(data || []);
+  }, []);
+
   // Fetch messages for selected conversation
   const fetchMessages = useCallback(async (conversationId: string) => {
     const { data, error } = await supabase
@@ -179,7 +261,15 @@ export default function Inbox() {
   // Initial load
   useEffect(() => {
     fetchConversations();
-  }, [fetchConversations]);
+    fetchTemplates();
+  }, [fetchConversations, fetchTemplates]);
+
+  // Load reminders for all conversations when they change
+  useEffect(() => {
+    if (conversations.length > 0) {
+      fetchAllReminders(conversations);
+    }
+  }, [conversations, fetchAllReminders]);
 
   // Load messages and reminder when conversation is selected
   useEffect(() => {
@@ -313,16 +403,96 @@ export default function Inbox() {
     fetchConversations();
   };
 
-  // Filter conversations by search
+  // Filter conversations by search and status
   const filteredConversations = conversations.filter(c => {
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
-    return (
-      c.client_name?.toLowerCase().includes(term) ||
-      c.client_phone.includes(term) ||
-      c.last_message?.toLowerCase().includes(term)
-    );
+    // Search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      const matchesSearch = (
+        c.client_name?.toLowerCase().includes(term) ||
+        c.client_phone.includes(term) ||
+        c.last_message?.toLowerCase().includes(term)
+      );
+      if (!matchesSearch) return false;
+    }
+
+    // Status filter
+    if (statusFilter !== 'all') {
+      const reminder = c.client_id ? conversationReminders[c.client_id] : null;
+      const allowedStatuses = FILTER_CATEGORIES[statusFilter].statuses;
+      
+      if (!allowedStatuses) return true;
+      
+      if (reminder) {
+        return allowedStatuses.includes(reminder.status);
+      }
+      
+      // If no reminder, show in 'progress' (new conversation without reminder)
+      return statusFilter === 'progress';
+    }
+
+    return true;
   });
+
+  // Calculate counts for each filter category
+  const filterCounts: Record<FilterCategory, number> = {
+    all: conversations.length,
+    action: conversations.filter(c => {
+      const r = c.client_id ? conversationReminders[c.client_id] : null;
+      return r && ['Onhold', 'To_be_called', 'To_be_contacted'].includes(r.status);
+    }).length,
+    progress: conversations.filter(c => {
+      const r = c.client_id ? conversationReminders[c.client_id] : null;
+      return !r || ['New', 'Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'].includes(r?.status || '');
+    }).length,
+    waiting: conversations.filter(c => {
+      const r = c.client_id ? conversationReminders[c.client_id] : null;
+      return r && r.status === 'Pending';
+    }).length,
+    resolved: conversations.filter(c => {
+      const r = c.client_id ? conversationReminders[c.client_id] : null;
+      return r && ['Appointment_confirmed', 'Completed', 'Closed'].includes(r.status);
+    }).length,
+  };
+
+  // Apply template to input with variable replacement
+  const applyTemplate = (template: MessageTemplate) => {
+    let content = template.content;
+    
+    // Replace variables
+    if (selectedConversation) {
+      content = content.replace(/\{\{client_name\}\}/g, selectedConversation.client_name || 'Client');
+      content = content.replace(/\{\{vehicle\}\}/g, selectedConversation.client?.vehicle || '');
+      content = content.replace(/\{\{center_name\}\}/g, selectedConversation.client?.center_name || '');
+    }
+    if (clientReminder) {
+      content = content.replace(/\{\{due_date\}\}/g, 
+        new Date(clientReminder.due_date).toLocaleDateString('fr-FR', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric'
+        })
+      );
+    } else {
+      content = content.replace(/\{\{due_date\}\}/g, '');
+    }
+    
+    setInput(content);
+    setShowQuickReplies(false);
+  };
+
+  // Handle shortcut detection in input
+  useEffect(() => {
+    if (input.startsWith('/') && templates.length > 0) {
+      const shortcut = input.toLowerCase();
+      const matchedTemplate = templates.find(t => 
+        t.shortcut?.toLowerCase() === shortcut
+      );
+      if (matchedTemplate) {
+        applyTemplate(matchedTemplate);
+      }
+    }
+  }, [input, templates]);
 
   // Format time
   const formatTime = (dateStr: string) => {
@@ -376,8 +546,8 @@ export default function Inbox() {
       {/* Conversations List */}
       <aside className="w-[360px] flex-none bg-white dark:bg-surface-dark border-r border-slate-200 dark:border-slate-800 flex flex-col">
         <div className="p-4 border-b border-slate-100 dark:border-slate-800">
-          <h3 className="text-xl font-bold mb-4">Messages</h3>
-          <div className="relative">
+          <h3 className="text-xl font-bold mb-3">Messages</h3>
+          <div className="relative mb-3">
             <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">search</span>
             <input 
               type="text" 
@@ -386,6 +556,33 @@ export default function Inbox() {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 bg-slate-100 dark:bg-slate-800 border-none rounded-lg py-2 text-sm" 
             />
+          </div>
+
+          {/* Filter Tabs */}
+          <div className="flex gap-1 flex-wrap">
+            {(Object.entries(FILTER_CATEGORIES) as [FilterCategory, typeof FILTER_CATEGORIES[FilterCategory]][]).map(([key, config]) => (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(key)}
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                  statusFilter === key
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 bg-slate-50 dark:bg-slate-800'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[14px]">{config.icon}</span>
+                <span>{config.label}</span>
+                {filterCounts[key] > 0 && (
+                  <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] ${
+                    statusFilter === key
+                      ? 'bg-white/20'
+                      : 'bg-slate-200 dark:bg-slate-600'
+                  }`}>
+                    {filterCounts[key]}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -420,9 +617,20 @@ export default function Inbox() {
                       {formatTime(conv.last_message_at)}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                    {conv.client_phone}
-                  </p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                      {conv.client_phone}
+                    </p>
+                    {/* Status Badge */}
+                    {conv.client_id && conversationReminders[conv.client_id] && (
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap flex items-center gap-0.5 ${
+                        STATUS_CONFIG[conversationReminders[conv.client_id].status]?.bgColor || 'bg-slate-100'
+                      } ${STATUS_CONFIG[conversationReminders[conv.client_id].status]?.color || 'text-slate-600'}`}>
+                        <span>{STATUS_CONFIG[conversationReminders[conv.client_id].status]?.icon}</span>
+                        <span>{STATUS_CONFIG[conversationReminders[conv.client_id].status]?.label}</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 mt-1">
                     <p className="text-sm text-slate-600 dark:text-slate-300 truncate flex-1">
                       {conv.last_message || 'Nouvelle conversation'}
@@ -520,17 +728,58 @@ export default function Inbox() {
           </div>
 
           {/* Input */}
-          <div className="p-4 bg-white dark:bg-surface-dark border-t border-slate-200 dark:border-slate-800 shrink-0">
+          <div className="p-4 bg-white dark:bg-surface-dark border-t border-slate-200 dark:border-slate-800 shrink-0 relative">
+            {/* Quick Replies Panel */}
+            {showQuickReplies && templates.length > 0 && (
+              <div className="absolute bottom-full left-4 right-4 mb-2 bg-white dark:bg-surface-dark rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 max-h-72 overflow-y-auto z-20">
+                <div className="p-3 border-b border-slate-100 dark:border-slate-800 sticky top-0 bg-white dark:bg-surface-dark">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Réponses rapides</span>
+                    <button 
+                      onClick={() => setShowQuickReplies(false)}
+                      className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-slate-400">close</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {templates.map((tpl) => (
+                    <button
+                      key={tpl.id}
+                      onClick={() => applyTemplate(tpl)}
+                      className="w-full p-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-semibold text-sm">{tpl.title}</span>
+                        {tpl.shortcut && (
+                          <code className="text-[10px] bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded font-mono">
+                            {tpl.shortcut}
+                          </code>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 line-clamp-2">{tpl.content}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-end gap-3">
               <div className="flex-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1.5 border border-transparent focus-within:border-primary/50 flex items-center">
-                <button className="p-2 text-slate-400 hover:text-slate-600 transition-all">
-                  <span className="material-symbols-outlined">attach_file</span>
+                {/* Quick Replies Button */}
+                <button 
+                  onClick={() => setShowQuickReplies(!showQuickReplies)}
+                  className={`p-2 transition-all ${showQuickReplies ? 'text-primary' : 'text-slate-400 hover:text-primary'}`}
+                  title="Réponses rapides (raccourcis: /rdv, /merci...)"
+                >
+                  <span className="material-symbols-outlined">bolt</span>
                 </button>
                 <textarea 
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                  placeholder="Écrivez votre message..." 
+                  placeholder="Écrivez ou tapez / pour les raccourcis..." 
                   className="w-full bg-transparent border-none focus:ring-0 text-sm py-2 resize-none max-h-32"
                   rows={1}
                   disabled={sending}

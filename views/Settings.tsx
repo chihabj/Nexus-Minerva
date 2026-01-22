@@ -1,13 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import type { UserProfile, ReminderStep, UserRole } from '../types';
+import type { UserProfile, ReminderStep, UserRole, MessageTemplate, MessageTemplateCategory } from '../types';
+
+// Category configuration for message templates
+const TEMPLATE_CATEGORIES: Record<MessageTemplateCategory, { label: string; color: string; bgColor: string }> = {
+  greeting: { label: 'Salutation', color: 'text-blue-700', bgColor: 'bg-blue-100' },
+  confirmation: { label: 'Confirmation', color: 'text-green-700', bgColor: 'bg-green-100' },
+  reminder: { label: 'Rappel', color: 'text-amber-700', bgColor: 'bg-amber-100' },
+  closing: { label: 'Clôture', color: 'text-purple-700', bgColor: 'bg-purple-100' },
+  general: { label: 'Général', color: 'text-slate-700', bgColor: 'bg-slate-100' },
+};
 
 export default function Settings() {
   const { profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'users' | 'workflow' | 'general'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'workflow' | 'messages' | 'general'>('users');
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [steps, setSteps] = useState<ReminderStep[]>([]);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -15,6 +25,17 @@ export default function Settings() {
   const [showNewUser, setShowNewUser] = useState(false);
   const [newUser, setNewUser] = useState({ email: '', password: '', full_name: '', role: 'agent' as UserRole });
   const [userError, setUserError] = useState('');
+
+  // New/Edit template form
+  const [showTemplateForm, setShowTemplateForm] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
+  const [templateForm, setTemplateForm] = useState({
+    title: '',
+    content: '',
+    category: 'general' as MessageTemplateCategory,
+    shortcut: '',
+  });
+  const [templateError, setTemplateError] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -38,6 +59,14 @@ export default function Settings() {
       .order('step_order', { ascending: true });
     
     if (stepsData) setSteps(stepsData);
+
+    // Fetch message templates
+    const { data: templatesData } = await supabase
+      .from('message_templates')
+      .select('*')
+      .order('sort_order', { ascending: true });
+    
+    if (templatesData) setTemplates(templatesData);
 
     setLoading(false);
   };
@@ -112,6 +141,94 @@ export default function Settings() {
     fetchData();
   };
 
+  // Template CRUD operations
+  const handleOpenTemplateForm = (template?: MessageTemplate) => {
+    if (template) {
+      setEditingTemplate(template);
+      setTemplateForm({
+        title: template.title,
+        content: template.content,
+        category: template.category,
+        shortcut: template.shortcut || '',
+      });
+    } else {
+      setEditingTemplate(null);
+      setTemplateForm({
+        title: '',
+        content: '',
+        category: 'general',
+        shortcut: '',
+      });
+    }
+    setTemplateError('');
+    setShowTemplateForm(true);
+  };
+
+  const handleSaveTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTemplateError('');
+    setSaving(true);
+
+    try {
+      const templateData = {
+        title: templateForm.title.trim(),
+        content: templateForm.content.trim(),
+        category: templateForm.category,
+        shortcut: templateForm.shortcut.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (editingTemplate) {
+        // Update existing
+        const { error } = await (supabase
+          .from('message_templates') as any)
+          .update(templateData)
+          .eq('id', editingTemplate.id);
+
+        if (error) throw error;
+      } else {
+        // Create new
+        const { error } = await (supabase
+          .from('message_templates') as any)
+          .insert({
+            ...templateData,
+            sort_order: templates.length + 1,
+            is_active: true,
+          });
+
+        if (error) throw error;
+      }
+
+      setShowTemplateForm(false);
+      setEditingTemplate(null);
+      fetchData();
+    } catch (err: any) {
+      setTemplateError(err.message || 'Erreur lors de la sauvegarde');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId: string) => {
+    if (!confirm('Supprimer ce message pré-enregistré ?')) return;
+
+    await (supabase
+      .from('message_templates') as any)
+      .delete()
+      .eq('id', templateId);
+    
+    fetchData();
+  };
+
+  const handleToggleTemplate = async (templateId: string, isActive: boolean) => {
+    await (supabase
+      .from('message_templates') as any)
+      .update({ is_active: !isActive })
+      .eq('id', templateId);
+    
+    fetchData();
+  };
+
   const getRoleBadge = (role: string) => {
     switch (role) {
       case 'superadmin':
@@ -165,6 +282,19 @@ export default function Settings() {
             <span className="flex items-center gap-2">
               <span className="material-symbols-outlined text-[18px]">account_tree</span>
               Workflow
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('messages')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'messages' 
+                ? 'bg-primary text-white shadow-sm' 
+                : 'text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[18px]">quick_phrases</span>
+              Messages
             </span>
           </button>
           <button
@@ -402,6 +532,196 @@ export default function Settings() {
                       le système arrête automatiquement les rappels pour ce client.
                     </p>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Messages Tab */}
+        {activeTab === 'messages' && (
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold">Messages pré-enregistrés</h2>
+                <p className="text-sm text-slate-500">Réponses rapides pour les agents ({templates.length} messages)</p>
+              </div>
+              <button
+                onClick={() => handleOpenTemplateForm()}
+                className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-dark transition-all"
+              >
+                <span className="material-symbols-outlined text-[18px]">add</span>
+                Nouveau message
+              </button>
+            </div>
+
+            {/* Template Form */}
+            {showTemplateForm && (
+              <div className="p-6 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
+                <h3 className="font-semibold mb-4">
+                  {editingTemplate ? 'Modifier le message' : 'Nouveau message pré-enregistré'}
+                </h3>
+                {templateError && (
+                  <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">{templateError}</div>
+                )}
+                <form onSubmit={handleSaveTemplate} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Titre</label>
+                      <input
+                        type="text"
+                        value={templateForm.title}
+                        onChange={(e) => setTemplateForm({ ...templateForm, title: e.target.value })}
+                        placeholder="Ex: Confirmation RDV"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        required
+                      />
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="flex-1">
+                        <label className="block text-sm font-medium mb-1">Catégorie</label>
+                        <select
+                          value={templateForm.category}
+                          onChange={(e) => setTemplateForm({ ...templateForm, category: e.target.value as MessageTemplateCategory })}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        >
+                          {Object.entries(TEMPLATE_CATEGORIES).map(([key, config]) => (
+                            <option key={key} value={key}>{config.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-sm font-medium mb-1">Raccourci</label>
+                        <input
+                          type="text"
+                          value={templateForm.shortcut}
+                          onChange={(e) => setTemplateForm({ ...templateForm, shortcut: e.target.value })}
+                          placeholder="/rdv"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Contenu du message</label>
+                    <textarea
+                      value={templateForm.content}
+                      onChange={(e) => setTemplateForm({ ...templateForm, content: e.target.value })}
+                      placeholder="Bonjour {{client_name}}, votre RDV est confirmé..."
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm h-24 resize-none"
+                      required
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      Variables disponibles : <code className="bg-slate-100 px-1 rounded">{'{{client_name}}'}</code>, 
+                      <code className="bg-slate-100 px-1 rounded ml-1">{'{{vehicle}}'}</code>, 
+                      <code className="bg-slate-100 px-1 rounded ml-1">{'{{due_date}}'}</code>, 
+                      <code className="bg-slate-100 px-1 rounded ml-1">{'{{center_name}}'}</code>
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-dark disabled:opacity-50"
+                    >
+                      {saving ? 'Enregistrement...' : editingTemplate ? 'Mettre à jour' : 'Créer'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTemplateForm(false);
+                        setEditingTemplate(null);
+                      }}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* Templates List */}
+            {templates.length === 0 ? (
+              <div className="p-12 text-center text-slate-400">
+                <span className="material-symbols-outlined text-5xl mb-4">quick_phrases</span>
+                <p className="text-lg font-medium">Aucun message pré-enregistré</p>
+                <p className="text-sm mt-2">Créez des réponses rapides pour vos agents.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {templates.map((template) => (
+                  <div 
+                    key={template.id} 
+                    className={`p-4 flex items-start gap-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all ${
+                      !template.is_active ? 'opacity-50' : ''
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="font-semibold text-sm">{template.title}</span>
+                        {template.shortcut && (
+                          <code className="px-2 py-0.5 bg-slate-200 dark:bg-slate-700 rounded text-xs font-mono">
+                            {template.shortcut}
+                          </code>
+                        )}
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          TEMPLATE_CATEGORIES[template.category]?.bgColor || 'bg-slate-100'
+                        } ${TEMPLATE_CATEGORIES[template.category]?.color || 'text-slate-700'}`}>
+                          {TEMPLATE_CATEGORIES[template.category]?.label || template.category}
+                        </span>
+                        {!template.is_active && (
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-medium">
+                            Inactif
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">{template.content}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleOpenTemplateForm(template)}
+                        className="p-2 text-slate-400 hover:text-primary hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-all"
+                        title="Modifier"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleToggleTemplate(template.id, template.is_active)}
+                        className={`p-2 rounded-lg transition-all ${
+                          template.is_active 
+                            ? 'text-green-600 hover:bg-green-50' 
+                            : 'text-slate-400 hover:bg-slate-100'
+                        }`}
+                        title={template.is_active ? 'Désactiver' : 'Activer'}
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          {template.is_active ? 'toggle_on' : 'toggle_off'}
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteTemplate(template.id)}
+                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                        title="Supprimer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Help box */}
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-start gap-3">
+                <span className="material-symbols-outlined text-blue-500">lightbulb</span>
+                <div>
+                  <p className="font-medium text-blue-900 dark:text-blue-100">Astuce</p>
+                  <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                    Les agents peuvent utiliser les raccourcis (ex: /rdv) dans la zone de saisie pour insérer rapidement un message. 
+                    Les variables comme {'{{client_name}}'} seront automatiquement remplacées.
+                  </p>
                 </div>
               </div>
             </div>
