@@ -442,9 +442,9 @@ export function useImportProcess() {
             inserted += insertedClients.length;
             
             // Create reminders for each inserted client (2-year rule)
-            // If due_date is <= 30 days, send WhatsApp immediately and set status to Reminder1_sent
+            // If due_date is within reminder window, send appropriate reminder immediately
             const remindersToInsert = [];
-            const remindersToUpdate: Array<{ client_id: string; sent_at: string }> = [];
+            const remindersToUpdate: Array<{ client_id: string; sent_at: string; status: string; current_step: number }> = [];
             
             for (const client of insertedClients) {
               const lastVisit = new Date(client.last_visit);
@@ -461,20 +461,51 @@ export function useImportProcess() {
               reminderDate.setDate(reminderDate.getDate() - 30);
               const reminderDateStr = reminderDate.toISOString().split('T')[0];
               
-              // Check if due_date is within 30 days
+              // Check if due_date is within the reminder window
               const today = new Date();
               today.setHours(0, 0, 0, 0);
               const dueDateObj = new Date(dueDate);
               dueDateObj.setHours(0, 0, 0, 0);
               const daysUntilDue = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
               
-              // If due_date is <= 30 days, send WhatsApp immediately
-              let initialStatus: 'New' | 'Reminder1_sent' = 'New';
+              // Determine which reminder step to send based on days until due
+              // Logic: 
+              // - J-30 to J-15: Send Reminder1 (first reminder)
+              // - J-15 to J-7: Send Reminder2 (second reminder)  
+              // - J-7 to J-3: Send Reminder3 (third reminder)
+              // - J-3 or less: Mark as To_be_called (call required)
+              // This applies to both future dates and overdue dates within the window
+              let initialStatus: 'New' | 'Reminder1_sent' | 'Reminder2_sent' | 'Reminder3_sent' | 'To_be_called' = 'New';
+              let currentStep = 0;
               let shouldSendNow = false;
               
-              if (daysUntilDue <= 30 && daysUntilDue >= 0) {
-                initialStatus = 'Reminder1_sent';
-                shouldSendNow = true;
+              // If due_date is within 30 days (past or future), determine which reminder to send
+              // Logic: J-30 to J-15 window applies to both future and overdue dates
+              // For overdue: if within 30 days after due date, still in Reminder1 window
+              if (daysUntilDue <= 30) {
+                // J-30 to J-15: First reminder
+                // This includes: future dates (15 < days <= 30) and overdue dates (if still within 30 days window)
+                if (daysUntilDue > 15 || (daysUntilDue <= 0 && daysUntilDue >= -30)) {
+                  // Future: J-30 to J-15, or Overdue: within 30 days after due date
+                  initialStatus = 'Reminder1_sent';
+                  currentStep = 1;
+                  shouldSendNow = true;
+                } else if (daysUntilDue > 7) {
+                  // J-15 to J-7: Second reminder
+                  initialStatus = 'Reminder2_sent';
+                  currentStep = 2;
+                  shouldSendNow = true;
+                } else if (daysUntilDue > 3) {
+                  // J-7 to J-3: Third reminder
+                  initialStatus = 'Reminder3_sent';
+                  currentStep = 3;
+                  shouldSendNow = true;
+                } else {
+                  // J-3 or less: Call required (or overdue beyond 30 days)
+                  initialStatus = 'To_be_called';
+                  currentStep = 4;
+                  shouldSendNow = false; // No WhatsApp, just mark for call
+                }
               }
               
               // Create reminder record
@@ -484,12 +515,13 @@ export function useImportProcess() {
                 reminder_date: reminderDateStr,
                 status: initialStatus,
                 message_template: 'rappel_visite_technique_vf',
-                current_step: initialStatus === 'Reminder1_sent' ? 1 : 0,
+                current_step: currentStep,
+                call_required: initialStatus === 'To_be_called',
               };
               
               remindersToInsert.push(reminderData);
               
-              // If we need to send immediately, send WhatsApp
+              // If we need to send WhatsApp immediately, send it
               if (shouldSendNow && client.phone) {
                 try {
                   // Format due date for message
@@ -508,23 +540,27 @@ export function useImportProcess() {
                   });
                   
                   if (whatsappResult.success) {
-                    console.log(`✅ WhatsApp sent immediately for client ${client.id} (due in ${daysUntilDue} days)`);
+                    console.log(`✅ WhatsApp sent immediately for client ${client.id} (${initialStatus}, due in ${daysUntilDue} days)`);
                     // Store for update after reminder insertion
                     remindersToUpdate.push({
                       client_id: client.id,
                       sent_at: new Date().toISOString(),
+                      status: initialStatus,
+                      current_step: currentStep,
                     });
                   } else {
                     console.warn(`⚠️ Failed to send WhatsApp for client ${client.id}:`, whatsappResult.error);
                     // If send fails, change status back to 'New' so cron can retry
                     reminderData.status = 'New';
                     reminderData.current_step = 0;
+                    reminderData.call_required = false;
                   }
                 } catch (error) {
                   console.error(`❌ Error sending WhatsApp for client ${client.id}:`, error);
                   // If error, change status back to 'New'
                   reminderData.status = 'New';
                   reminderData.current_step = 0;
+                  reminderData.call_required = false;
                 }
               }
             }
@@ -540,7 +576,7 @@ export function useImportProcess() {
                 console.warn('Failed to create reminders:', reminderError.message);
                 // Don't fail the whole import for reminder creation errors
               } else if (insertedReminders && remindersToUpdate.length > 0) {
-                // Update reminders that had WhatsApp sent immediately (add sent_at timestamp)
+                // Update reminders that had WhatsApp sent immediately
                 for (const update of remindersToUpdate) {
                   const reminder = insertedReminders.find(r => r.client_id === update.client_id);
                   if (reminder) {
@@ -548,6 +584,8 @@ export function useImportProcess() {
                       .from('reminders') as any)
                       .update({
                         sent_at: update.sent_at,
+                        status: update.status,
+                        current_step: update.current_step,
                       })
                       .eq('id', reminder.id);
                   }
