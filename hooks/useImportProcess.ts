@@ -351,7 +351,9 @@ export function useImportProcess() {
         
         try {
           const client: any = {
-            status: 'New' as const, // New workflow status for newly imported clients
+            // Status will default to 'New' in database if not provided
+            // Explicitly set it to ensure consistency
+            status: 'New' as const,
           };
 
           // Map each field
