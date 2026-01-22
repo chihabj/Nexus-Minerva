@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../services/supabaseClient';
-import { sendTextMessage, markMessageAsRead } from '../services/whatsapp';
-import type { Conversation, Message, Client, Reminder, ReminderStatus } from '../types';
+import { sendTextMessage } from '../services/whatsapp';
+import type { Conversation, Message, Reminder, ReminderStatus } from '../types';
 
 // Status configuration for display and actions
 const STATUS_CONFIG: Record<string, { 
@@ -71,36 +71,55 @@ export default function Inbox() {
       .limit(1)
       .single();
 
-    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+    if (error && error.code !== 'PGRST116') {
       console.error('Error fetching reminder:', error);
     }
     
     setClientReminder(data || null);
   }, []);
 
-  // Update reminder status
+  // Update reminder status - BUG FIXES APPLIED
   const updateReminderStatus = async (newStatus: ReminderStatus) => {
     if (!clientReminder) return;
 
+    // FIX BUG 2: Capture the client_id at the start of the operation
+    // so it doesn't change if user switches conversation during await
+    const targetReminderId = clientReminder.id;
+    const targetClientId = clientReminder.client_id;
+
     setUpdatingStatus(true);
     try {
+      // Prepare the timestamp for Onhold status
+      const newResponseReceivedAt = newStatus === 'Onhold' 
+        ? new Date().toISOString() 
+        : clientReminder.response_received_at;
+
       const { error } = await supabase
         .from('reminders')
         .update({ 
           status: newStatus,
-          response_received_at: newStatus === 'Onhold' ? new Date().toISOString() : clientReminder.response_received_at,
+          response_received_at: newResponseReceivedAt,
         })
-        .eq('id', clientReminder.id);
+        .eq('id', targetReminderId);
 
       if (error) throw error;
 
-      setClientReminder(prev => prev ? { ...prev, status: newStatus } : null);
+      // FIX BUG 1: Update local state with BOTH status AND response_received_at
+      setClientReminder(prev => prev && prev.id === targetReminderId 
+        ? { 
+            ...prev, 
+            status: newStatus,
+            response_received_at: newResponseReceivedAt, // Include the timestamp!
+          } 
+        : prev
+      );
+      
       setToast({ type: 'success', message: `Statut mis à jour: ${STATUS_CONFIG[newStatus]?.label || newStatus}` });
 
-      // Also add a note about the status change
-      if (selectedConversation?.client_id) {
+      // FIX BUG 2: Use the captured targetClientId instead of selectedConversation.client_id
+      if (targetClientId) {
         await supabase.from('client_notes').insert({
-          client_id: selectedConversation.client_id,
+          client_id: targetClientId,
           content: `Statut changé à "${STATUS_CONFIG[newStatus]?.label || newStatus}" depuis la messagerie`,
           author: 'Agent',
           note_type: 'system',
@@ -167,7 +186,6 @@ export default function Inbox() {
     if (selectedConversation) {
       fetchMessages(selectedConversation.id);
       
-      // Fetch reminder if client is linked
       if (selectedConversation.client_id) {
         fetchClientReminder(selectedConversation.client_id);
       } else {
@@ -185,7 +203,6 @@ export default function Inbox() {
 
   // Subscribe to realtime updates
   useEffect(() => {
-    // Subscribe to new messages
     const messagesChannel = supabase
       .channel('messages-changes')
       .on(
@@ -195,10 +212,8 @@ export default function Inbox() {
           const newMessage = payload.new as Message;
           console.log('📩 New message received via realtime:', newMessage);
           
-          // If it's for the current conversation, add it (avoid duplicates)
           if (selectedConversation && newMessage.conversation_id === selectedConversation.id) {
             setMessages(prev => {
-              // Check if message already exists (by id or wa_message_id)
               const exists = prev.some(m => 
                 m.id === newMessage.id || 
                 (m.wa_message_id && m.wa_message_id === newMessage.wa_message_id)
@@ -211,13 +226,11 @@ export default function Inbox() {
             });
           }
           
-          // Refresh conversations list
           fetchConversations();
         }
       )
       .subscribe();
 
-    // Subscribe to conversation updates
     const conversationsChannel = supabase
       .channel('conversations-changes')
       .on(
@@ -244,21 +257,18 @@ export default function Inbox() {
     setSending(true);
 
     try {
-      // Send via WhatsApp API
       const result = await sendTextMessage(selectedConversation.client_phone, messageText);
 
       if (!result.success) {
         console.error('Failed to send WhatsApp message:', result.error);
-        // Still save to DB for record keeping
       }
 
-      // Save message to database
       const { data: savedMessage, error } = await supabase
         .from('messages')
         .insert({
           conversation_id: selectedConversation.id,
           wa_message_id: result.messageId || null,
-          from_phone: '33767668396', // Our number
+          from_phone: '33767668396',
           to_phone: selectedConversation.client_phone,
           direction: 'outbound',
           message_type: 'text',
@@ -275,7 +285,6 @@ export default function Inbox() {
         setMessages(prev => [...prev, savedMessage]);
       }
 
-      // Update conversation
       await supabase
         .from('conversations')
         .update({
@@ -599,6 +608,18 @@ export default function Inbox() {
                     Dernière relance: {clientReminder.last_reminder_sent}
                   </div>
                 )}
+
+                {/* Response received timestamp - BUG 1 FIX: Now properly updated */}
+                {clientReminder.response_received_at && (
+                  <div className="text-xs opacity-80 mt-1">
+                    Réponse reçue: {new Date(clientReminder.response_received_at).toLocaleDateString('fr-FR', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Status Change Actions */}
@@ -678,7 +699,7 @@ export default function Inbox() {
             <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Actions rapides</h4>
             <div className="flex flex-col gap-2">
               <a 
-                href={`/clients/${selectedConversation.client_id}`}
+                href={`#/clients/${selectedConversation.client_id}`}
                 className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 transition-all"
               >
                 <span className="material-symbols-outlined text-sm">person</span>
