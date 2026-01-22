@@ -94,8 +94,8 @@ export default function Inbox() {
         ? new Date().toISOString() 
         : clientReminder.response_received_at;
 
-      const { error } = await supabase
-        .from('reminders')
+      const { error } = await (supabase
+        .from('reminders') as any)
         .update({ 
           status: newStatus,
           response_received_at: newResponseReceivedAt,
@@ -118,7 +118,7 @@ export default function Inbox() {
 
       // FIX BUG 2: Use the captured targetClientId instead of selectedConversation.client_id
       if (targetClientId) {
-        await supabase.from('client_notes').insert({
+        await (supabase.from('client_notes') as any).insert({
           client_id: targetClientId,
           content: `Statut changé à "${STATUS_CONFIG[newStatus]?.label || newStatus}" depuis la messagerie`,
           author: 'Agent',
@@ -165,8 +165,8 @@ export default function Inbox() {
     setMessages(data || []);
     
     // Mark conversation as read
-    await supabase
-      .from('conversations')
+    await (supabase
+      .from('conversations') as any)
       .update({ unread_count: 0 })
       .eq('id', conversationId);
 
@@ -263,8 +263,8 @@ export default function Inbox() {
         console.error('Failed to send WhatsApp message:', result.error);
       }
 
-      const { data: savedMessage, error } = await supabase
-        .from('messages')
+      const { data: savedMessage, error } = await (supabase
+        .from('messages') as any)
         .insert({
           conversation_id: selectedConversation.id,
           wa_message_id: result.messageId || null,
@@ -285,8 +285,8 @@ export default function Inbox() {
         setMessages(prev => [...prev, savedMessage]);
       }
 
-      await supabase
-        .from('conversations')
+      await (supabase
+        .from('conversations') as any)
         .update({
           last_message: messageText,
           last_message_at: new Date().toISOString(),
@@ -304,8 +304,8 @@ export default function Inbox() {
   const handleMarkResolved = async () => {
     if (!selectedConversation) return;
 
-    await supabase
-      .from('conversations')
+    await (supabase
+      .from('conversations') as any)
       .update({ status: 'resolved' })
       .eq('id', selectedConversation.id);
 
@@ -603,9 +603,9 @@ export default function Inbox() {
                 </div>
 
                 {/* Last reminder info */}
-                {clientReminder.current_step > 0 && (
+                {clientReminder.last_reminder_sent && (
                   <div className="text-xs opacity-80 mt-1">
-                    Dernière relance: Étape {clientReminder.current_step}
+                    Dernière relance: {clientReminder.last_reminder_sent}
                   </div>
                 )}
 
