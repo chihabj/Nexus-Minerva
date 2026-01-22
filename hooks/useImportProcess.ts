@@ -11,6 +11,7 @@ import {
   isValidDateString
 } from '../utils/dataNormalizer';
 import { supabase } from '../services/supabaseClient';
+import { sendRappelVisiteTechnique } from '../services/whatsapp';
 import { MappingField, MappingConfidence } from '../types';
 
 // ============================================
@@ -439,8 +440,11 @@ export function useImportProcess() {
             inserted += insertedClients.length;
             
             // Create reminders for each inserted client (2-year rule)
-            // All new imports start with 'New' status, cron job will process them at J-30
-            const remindersToInsert = insertedClients.map(client => {
+            // If due_date is <= 30 days, send WhatsApp immediately and set status to Reminder1_sent
+            const remindersToInsert = [];
+            const remindersToUpdate: Array<{ client_id: string; sent_at: string }> = [];
+            
+            for (const client of insertedClients) {
               const lastVisit = new Date(client.last_visit);
               
               // Calculate next visit = last_visit + 2 years
@@ -455,31 +459,97 @@ export function useImportProcess() {
               reminderDate.setDate(reminderDate.getDate() - 30);
               const reminderDateStr = reminderDate.toISOString().split('T')[0];
               
-              // NEW WORKFLOW: All new imports start with 'New' status
-              // The cron job will process them when:
-              // - J-30: New → Reminder1_sent (send WhatsApp)
-              // - J-15: Reminder1_sent → Reminder2_sent
-              // - J-7: Reminder2_sent → Reminder3_sent
-              // - J-3: Reminder3_sent → To_be_called
+              // Check if due_date is within 30 days
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const dueDateObj = new Date(dueDate);
+              dueDateObj.setHours(0, 0, 0, 0);
+              const daysUntilDue = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
               
-              return {
+              // If due_date is <= 30 days, send WhatsApp immediately
+              let initialStatus: 'New' | 'Reminder1_sent' = 'New';
+              let shouldSendNow = false;
+              
+              if (daysUntilDue <= 30 && daysUntilDue >= 0) {
+                initialStatus = 'Reminder1_sent';
+                shouldSendNow = true;
+              }
+              
+              // Create reminder record
+              const reminderData = {
                 client_id: client.id,
                 due_date: dueDate,
                 reminder_date: reminderDateStr,
-                status: 'New', // Always start with 'New' status
+                status: initialStatus,
                 message_template: 'rappel_visite_technique_vf',
+                current_step: initialStatus === 'Reminder1_sent' ? 1 : 0,
               };
-            });
+              
+              remindersToInsert.push(reminderData);
+              
+              // If we need to send immediately, send WhatsApp
+              if (shouldSendNow && client.phone) {
+                try {
+                  // Format due date for message
+                  const formattedDueDate = dueDateObj.toLocaleDateString('fr-FR', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  });
+                  
+                  // Send WhatsApp message
+                  const whatsappResult = await sendRappelVisiteTechnique({
+                    to: client.phone,
+                    clientName: client.name || 'Client',
+                    vehicleName: client.vehicle || 'Votre véhicule',
+                    dateEcheance: formattedDueDate,
+                  });
+                  
+                  if (whatsappResult.success) {
+                    console.log(`✅ WhatsApp sent immediately for client ${client.id} (due in ${daysUntilDue} days)`);
+                    // Store for update after reminder insertion
+                    remindersToUpdate.push({
+                      client_id: client.id,
+                      sent_at: new Date().toISOString(),
+                    });
+                  } else {
+                    console.warn(`⚠️ Failed to send WhatsApp for client ${client.id}:`, whatsappResult.error);
+                    // If send fails, change status back to 'New' so cron can retry
+                    reminderData.status = 'New';
+                    reminderData.current_step = 0;
+                  }
+                } catch (error) {
+                  console.error(`❌ Error sending WhatsApp for client ${client.id}:`, error);
+                  // If error, change status back to 'New'
+                  reminderData.status = 'New';
+                  reminderData.current_step = 0;
+                }
+              }
+            }
             
             // Insert reminders
             if (remindersToInsert.length > 0) {
-              const { error: reminderError } = await supabase
+              const { data: insertedReminders, error: reminderError } = await supabase
                 .from('reminders')
-                .insert(remindersToInsert);
+                .insert(remindersToInsert)
+                .select();
               
               if (reminderError) {
                 console.warn('Failed to create reminders:', reminderError.message);
                 // Don't fail the whole import for reminder creation errors
+              } else if (insertedReminders && remindersToUpdate.length > 0) {
+                // Update reminders that had WhatsApp sent immediately (add sent_at timestamp)
+                for (const update of remindersToUpdate) {
+                  const reminder = insertedReminders.find(r => r.client_id === update.client_id);
+                  if (reminder) {
+                    await (supabase
+                      .from('reminders') as any)
+                      .update({
+                        sent_at: update.sent_at,
+                      })
+                      .eq('id', reminder.id);
+                  }
+                }
               }
             }
           }

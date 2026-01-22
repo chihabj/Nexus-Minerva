@@ -233,6 +233,7 @@ export default function Inbox() {
 
   // Fetch messages for selected conversation
   const fetchMessages = useCallback(async (conversationId: string) => {
+    console.log('📥 Fetching messages for conversation:', conversationId);
     const { data, error } = await supabase
       .from('messages')
       .select('*')
@@ -244,6 +245,7 @@ export default function Inbox() {
       return;
     }
 
+    console.log(`✅ Fetched ${data?.length || 0} messages`);
     setMessages(data || []);
     
     // Mark conversation as read
@@ -274,6 +276,7 @@ export default function Inbox() {
   // Load messages and reminder when conversation is selected
   useEffect(() => {
     if (selectedConversation) {
+      // Always fetch messages when selecting a conversation to ensure we have the latest
       fetchMessages(selectedConversation.id);
       
       if (selectedConversation.client_id) {
@@ -282,6 +285,7 @@ export default function Inbox() {
         setClientReminder(null);
       }
     } else {
+      setMessages([]);
       setClientReminder(null);
     }
   }, [selectedConversation, fetchMessages, fetchClientReminder]);
@@ -302,6 +306,7 @@ export default function Inbox() {
           const newMessage = payload.new as Message;
           console.log('📩 New message received via realtime:', newMessage);
           
+          // If this message belongs to the selected conversation, add it to the messages list
           if (selectedConversation && newMessage.conversation_id === selectedConversation.id) {
             setMessages(prev => {
               const exists = prev.some(m => 
@@ -312,10 +317,15 @@ export default function Inbox() {
                 console.log('⏭️ Message already exists, skipping duplicate');
                 return prev;
               }
+              console.log('✅ Adding new message to list');
               return [...prev, newMessage];
             });
+          } else if (selectedConversation) {
+            // If message is for a different conversation, just refresh conversations list
+            console.log('📬 New message for different conversation, refreshing list');
           }
           
+          // Always refresh conversations list to update unread counts and last message
           fetchConversations();
         }
       )

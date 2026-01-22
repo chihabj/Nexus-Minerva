@@ -337,12 +337,13 @@ async function saveIncomingMessage(
   console.log('✅ Message saved:', data.id);
   
   // Update conversation with last message
+  // Note: unread_count is automatically incremented by database trigger for inbound messages
   await supabase
     .from('conversations')
     .update({ 
       last_message: messageContent?.substring(0, 100) || `[${message.type}]`,
       last_message_at: new Date().toISOString(),
-      unread_count: 1
+      // Don't set unread_count here - let the database trigger handle it
     })
     .eq('id', conversationId);
   
