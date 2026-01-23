@@ -37,7 +37,7 @@ const STATUS_ACTIONS: Record<string, ReminderStatus[]> = {
 };
 
 // Filter categories for conversation list
-type FilterCategory = 'all' | 'action' | 'progress' | 'waiting' | 'resolved';
+type FilterCategory = 'all' | 'action' | 'progress' | 'waiting' | 'resolved' | 'auto_reminders';
 const FILTER_CATEGORIES: Record<FilterCategory, { 
   label: string; 
   icon: string; 
@@ -64,6 +64,11 @@ const FILTER_CATEGORIES: Record<FilterCategory, {
     icon: 'check_circle', 
     statuses: ['Appointment_confirmed', 'Completed', 'Closed'] 
   },
+  auto_reminders: { 
+    label: 'Relances automatiques', 
+    icon: 'send', 
+    statuses: null 
+  },
 };
 
 export default function Inbox() {
@@ -85,6 +90,7 @@ export default function Inbox() {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [conversationReminders, setConversationReminders] = useState<Record<string, Reminder>>({});
+  const [conversationsWithInboundMessages, setConversationsWithInboundMessages] = useState<Set<string>>(new Set());
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -216,6 +222,37 @@ export default function Inbox() {
     setConversationReminders(reminderMap);
   }, []);
 
+  // Fetch conversations with inbound messages (to filter auto_reminders)
+  const fetchConversationsWithInboundMessages = useCallback(async (convs: Conversation[]) => {
+    const conversationIds = convs.map(c => c.id);
+    
+    if (conversationIds.length === 0) {
+      setConversationsWithInboundMessages(new Set());
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('conversation_id')
+      .in('conversation_id', conversationIds)
+      .eq('direction', 'inbound');
+
+    if (error) {
+      console.error('Error fetching inbound messages:', error);
+      return;
+    }
+
+    // Create a Set of conversation IDs that have inbound messages
+    const conversationsWithInbound = new Set<string>();
+    (data || []).forEach(msg => {
+      if (msg.conversation_id) {
+        conversationsWithInbound.add(msg.conversation_id);
+      }
+    });
+
+    setConversationsWithInboundMessages(conversationsWithInbound);
+  }, []);
+
   // Fetch message templates
   const fetchTemplates = useCallback(async () => {
     const { data, error } = await supabase
@@ -302,8 +339,9 @@ export default function Inbox() {
   useEffect(() => {
     if (conversations.length > 0) {
       fetchAllReminders(conversations);
+      fetchConversationsWithInboundMessages(conversations);
     }
-  }, [conversations, fetchAllReminders]);
+  }, [conversations, fetchAllReminders, fetchConversationsWithInboundMessages]);
 
   // Load messages and reminder when conversation is selected
   useEffect(() => {
@@ -363,6 +401,11 @@ export default function Inbox() {
           
           // Always refresh conversations list to update unread counts and last message
           fetchConversations();
+          
+          // If this is an inbound message, update the inbound messages set immediately
+          if (newMessage.direction === 'inbound') {
+            setConversationsWithInboundMessages(prev => new Set([...prev, newMessage.conversation_id]));
+          }
         }
       )
       .subscribe();
@@ -382,7 +425,7 @@ export default function Inbox() {
       supabase.removeChannel(messagesChannel);
       supabase.removeChannel(conversationsChannel);
     };
-  }, [selectedConversation, fetchConversations]);
+  }, [selectedConversation, fetchConversations, fetchConversationsWithInboundMessages]);
 
   // Send message
   const handleSend = async () => {
@@ -467,6 +510,15 @@ export default function Inbox() {
       const reminder = c.client_id ? conversationReminders[c.client_id] : null;
       const allowedStatuses = FILTER_CATEGORIES[statusFilter].statuses;
       
+      // Special handling for auto_reminders: only show conversations with Reminder1_sent, Reminder2_sent, or Reminder3_sent
+      // AND that have NO inbound messages
+      if (statusFilter === 'auto_reminders') {
+        if (!reminder) return false;
+        const isAutoReminderStatus = ['Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'].includes(reminder.status);
+        const hasInboundMessages = conversationsWithInboundMessages.has(c.id);
+        return isAutoReminderStatus && !hasInboundMessages;
+      }
+      
       if (!allowedStatuses) return true;
       
       if (reminder) {
@@ -498,6 +550,13 @@ export default function Inbox() {
     resolved: conversations.filter(c => {
       const r = c.client_id ? conversationReminders[c.client_id] : null;
       return r && ['Appointment_confirmed', 'Completed', 'Closed'].includes(r.status);
+    }).length,
+    auto_reminders: conversations.filter(c => {
+      const r = c.client_id ? conversationReminders[c.client_id] : null;
+      if (!r) return false;
+      const isAutoReminderStatus = ['Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'].includes(r.status);
+      const hasInboundMessages = conversationsWithInboundMessages.has(c.id);
+      return isAutoReminderStatus && !hasInboundMessages;
     }).length,
   };
 
