@@ -73,6 +73,7 @@ export default function Inbox() {
   const [clientReminder, setClientReminder] = useState<Reminder | null>(null);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -234,30 +235,61 @@ export default function Inbox() {
   // Fetch messages for selected conversation
   const fetchMessages = useCallback(async (conversationId: string) => {
     console.log('📥 Fetching messages for conversation:', conversationId);
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching messages:', error);
+    
+    if (!conversationId) {
+      console.error('❌ No conversation ID provided');
+      setMessages([]);
+      setLoadingMessages(false);
       return;
     }
 
-    console.log(`✅ Fetched ${data?.length || 0} messages`);
-    setMessages(data || []);
-    
-    // Mark conversation as read
-    await (supabase
-      .from('conversations') as any)
-      .update({ unread_count: 0 })
-      .eq('id', conversationId);
+    setLoadingMessages(true);
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
 
-    // Update local state
-    setConversations(prev => 
-      prev.map(c => c.id === conversationId ? { ...c, unread_count: 0 } : c)
-    );
+      if (error) {
+        console.error('❌ Error fetching messages:', error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
+        setMessages([]);
+        setLoadingMessages(false);
+        return;
+      }
+
+      console.log(`✅ Fetched ${data?.length || 0} messages for conversation ${conversationId}`);
+      if (data && data.length > 0) {
+        console.log('📋 Messages:', data.map(m => ({ id: m.id, content: m.content?.substring(0, 50), direction: m.direction, created_at: m.created_at })));
+      } else {
+        console.log('⚠️ No messages found for this conversation');
+        // Double-check: maybe messages exist but with different conversation_id?
+        const { data: allMessages } = await supabase
+          .from('messages')
+          .select('conversation_id')
+          .limit(5);
+        console.log('📊 Sample conversation_ids in messages table:', allMessages?.map(m => m.conversation_id));
+      }
+      
+      setMessages(data || []);
+      
+      // Mark conversation as read
+      await (supabase
+        .from('conversations') as any)
+        .update({ unread_count: 0 })
+        .eq('id', conversationId);
+
+      // Update local state
+      setConversations(prev => 
+        prev.map(c => c.id === conversationId ? { ...c, unread_count: 0 } : c)
+      );
+    } catch (err) {
+      console.error('❌ Exception in fetchMessages:', err);
+      setMessages([]);
+    } finally {
+      setLoadingMessages(false);
+    }
   }, []);
 
   // Initial load
@@ -276,6 +308,9 @@ export default function Inbox() {
   // Load messages and reminder when conversation is selected
   useEffect(() => {
     if (selectedConversation) {
+      console.log('🔄 Conversation selected:', selectedConversation.id, selectedConversation.client_name || selectedConversation.client_phone);
+      // Clear messages first to avoid showing stale data
+      setMessages([]);
       // Always fetch messages when selecting a conversation to ensure we have the latest
       fetchMessages(selectedConversation.id);
       
@@ -285,6 +320,7 @@ export default function Inbox() {
         setClientReminder(null);
       }
     } else {
+      console.log('🔄 No conversation selected, clearing messages');
       setMessages([]);
       setClientReminder(null);
     }
@@ -699,10 +735,16 @@ export default function Inbox() {
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-            {messages.length === 0 ? (
+            {loadingMessages ? (
+              <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+                <p>Chargement des messages...</p>
+              </div>
+            ) : messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-400">
                 <span className="material-symbols-outlined text-6xl mb-4">forum</span>
                 <p>Aucun message dans cette conversation</p>
+                <p className="text-xs mt-2 text-slate-400">Vérifiez la console pour plus de détails</p>
               </div>
             ) : (
               messages.map((m) => (
