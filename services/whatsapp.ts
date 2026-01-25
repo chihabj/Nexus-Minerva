@@ -52,12 +52,32 @@ export interface WhatsAppTemplateParams {
 
 /**
  * Paramètres spécifiques pour le template rappel_visite_technique
+ * 
+ * Variables du template:
+ * - DatePrecedentVisite: Date de la précédente visite (format: DD/MM/YYYY)
+ * - Marque: Marque du véhicule (ex: "Peugeot")
+ * - Modele: Modèle du véhicule (ex: "308")
+ * - Immat: Immatriculation du véhicule
+ * - DateProchVis: Date de la prochaine visite (format: DD/MM/YYYY)
+ * - TypeCentre: Type/réseau du centre (ex: "AUTOSUR")
+ * - centre: Nom complet du centre (ex: "AUTOSUR - BOURG-LA-REINE")
+ * 
+ * Boutons:
+ * - "Prendre RDV": Bouton URL avec la short_url du centre
+ * - "Nous appeler": Bouton téléphone avec le numéro du centre
  */
 export interface RappelVisiteTechniqueParams {
   to: string;
-  clientName: string;
-  vehicleName: string;
-  dateEcheance: string;
+  templateName?: string; // Nom du template WhatsApp spécifique au centre (optionnel, défaut: rappel_visite_technique_vf)
+  datePrecedentVisite: string; // Format: DD/MM/YYYY
+  marque: string;
+  modele: string;
+  immat: string;
+  dateProchVis: string; // Format: DD/MM/YYYY
+  typeCentre: string;
+  nomCentre: string;
+  shortUrlRendezVous: string; // URL pour le bouton "Prendre RDV"
+  numeroAppelCentre: string; // Numéro de téléphone pour le bouton "Nous appeler"
 }
 
 /**
@@ -179,36 +199,81 @@ export async function sendWhatsAppTemplate({
 /**
  * Envoie le template "rappel_visite_technique_vf" avec les variables du client
  * 
- * Variables du template:
- * - {{1}} = Nom du client (ex: "Jean")
- * - {{2}} = Véhicule (ex: "Peugeot 308")
- * - {{3}} = Date d'échéance (ex: "15/02/2026")
+ * Variables du template (dans l'ordre):
+ * - DatePrecedentVisite: Date de la précédente visite
+ * - Marque: Marque du véhicule
+ * - Modele: Modèle du véhicule
+ * - Immat: Immatriculation
+ * - DateProchVis: Date de la prochaine visite
+ * - TypeCentre: Type/réseau du centre
+ * - centre: Nom complet du centre
  * 
- * Boutons Quick Reply:
- * - "prendre RDV"
- * - "être rappelé"
+ * Boutons:
+ * - Index 0: "Prendre RDV" (URL)
+ * - Index 1: "Nous appeler" (Téléphone)
  */
 export async function sendRappelVisiteTechnique({
   to,
-  clientName,
-  vehicleName,
-  dateEcheance,
+  templateName,
+  datePrecedentVisite,
+  marque,
+  modele,
+  immat,
+  dateProchVis,
+  typeCentre,
+  nomCentre,
+  shortUrlRendezVous,
+  numeroAppelCentre,
 }: RappelVisiteTechniqueParams): Promise<WhatsAppResponse> {
+  
+  // Utiliser le template spécifique au centre, ou le template par défaut
+  const finalTemplateName = templateName || 'rappel_visite_technique_vf';
   
   const components: TemplateComponent[] = [
     {
       type: 'body',
       parameters: [
-        { type: 'text', text: clientName || 'Client' },      // {{1}}
-        { type: 'text', text: vehicleName || 'Véhicule' },   // {{2}}
-        { type: 'text', text: dateEcheance || 'Bientôt' },   // {{3}}
+        { type: 'text', text: datePrecedentVisite || 'N/A' },  // DatePrecedentVisite
+        { type: 'text', text: marque || 'N/A' },               // Marque
+        { type: 'text', text: modele || 'N/A' },               // Modele
+        { type: 'text', text: immat || 'N/A' },                // Immat
+        { type: 'text', text: dateProchVis || 'N/A' },        // DateProchVis
+        { type: 'text', text: typeCentre || 'N/A' },           // TypeCentre
+        { type: 'text', text: nomCentre || 'N/A' },            // centre
+      ],
+    },
+    // Bouton "Prendre RDV" (URL) - Seulement si le template a des boutons dynamiques
+    // Note: Pour les templates par centre avec boutons fixes, ces composants seront ignorés par l'API
+    {
+      type: 'button',
+      sub_type: 'url',
+      index: 0,
+      parameters: [
+        {
+          type: 'text',
+          text: shortUrlRendezVous || '',
+        },
+      ],
+    },
+    // Bouton "Nous appeler" (Téléphone)
+    {
+      type: 'button',
+      sub_type: 'phone_number',
+      index: 1,
+      parameters: [
+        {
+          type: 'text',
+          text: cleanPhoneNumber(numeroAppelCentre) || '',
+        },
       ],
     },
   ];
 
+  console.log(`📤 Utilisation du template: ${finalTemplateName}`);
+
   return sendWhatsAppTemplate({
     to,
-    templateName: 'rappel_visite_technique_vf',
+    templateName: finalTemplateName,
     languageCode: 'fr',
     components,
   });

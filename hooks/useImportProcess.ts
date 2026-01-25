@@ -13,6 +13,46 @@ import {
 import { supabase } from '../services/supabaseClient';
 import { sendRappelVisiteTechnique } from '../services/whatsapp';
 import { MappingField, MappingConfidence } from '../types';
+import { matchCenter, loadCenters, invalidateCentersCache } from '../utils/centerMatcher';
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+/**
+ * Formate une date pour l'affichage dans le message WhatsApp (format DD/MM/YYYY)
+ */
+function formatDateForMessage(dateStr: string | null): string {
+  if (!dateStr) return 'N/A';
+  try {
+    const date = new Date(dateStr);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch {
+    return dateStr || 'N/A';
+  }
+}
+
+/**
+ * Parse le véhicule pour extraire la marque et le modèle
+ * Format attendu: "Marque Modèle" ou "Marque Modèle Année"
+ */
+function parseVehicle(vehicle: string | null): { marque: string; modele: string } {
+  if (!vehicle) return { marque: 'N/A', modele: 'N/A' };
+  
+  const parts = vehicle.trim().split(/\s+/);
+  if (parts.length === 0) return { marque: 'N/A', modele: 'N/A' };
+  if (parts.length === 1) return { marque: parts[0], modele: 'N/A' };
+  
+  // La première partie est généralement la marque
+  const marque = parts[0];
+  // Le reste est le modèle (peut inclure l'année, mais on prend tout sauf la dernière partie si c'est un nombre)
+  const modele = parts.slice(1).join(' ');
+  
+  return { marque, modele };
+}
 
 // ============================================
 // TYPES
@@ -48,6 +88,18 @@ export interface ImportResult {
   errors: string[];
 }
 
+export interface ClientForReminder {
+  client_id: string;
+  reminder_id: string;
+  name: string;
+  phone: string;
+  vehicle: string | null;
+  due_date: string;
+  daysUntilDue: number;
+  initialStatus: 'Reminder1_sent' | 'Reminder2_sent' | 'Reminder3_sent';
+  currentStep: number;
+}
+
 export interface ImportState {
   step: ImportStep;
   file: File | null;
@@ -55,6 +107,7 @@ export interface ImportState {
   mappings: ColumnMapping[];
   validationResult: ValidationResult | null;
   importResult: ImportResult | null;
+  clientsForReminder: ClientForReminder[];
   isLoading: boolean;
   error: string | null;
 }
@@ -83,6 +136,7 @@ export function useImportProcess() {
     mappings: [],
     validationResult: null,
     importResult: null,
+    clientsForReminder: [],
     isLoading: false,
     error: null,
   });
@@ -337,6 +391,10 @@ export function useImportProcess() {
     setState(prev => ({ ...prev, step: 'importing', isLoading: true, error: null }));
 
     try {
+      // Précharger les centres dans le cache pour le matching
+      console.log('📋 Chargement des centres pour le matching...');
+      await loadCenters(true); // Force reload pour avoir les données fraîches
+      
       const { rows } = state.parsedData;
       const mappingMap = new Map(state.mappings.map(m => [m.dbField, m.csvColumn]));
 
@@ -394,7 +452,9 @@ export function useImportProcess() {
                   client.region = normalizeText(strValue);
                   break;
                 case 'center_name':
+                  // Stocker temporairement le nom brut, sera matché après
                   client.center_name = normalizeText(strValue);
+                  client._raw_center_name = strValue; // Pour le matching ultérieur
                   break;
               }
             }
@@ -415,6 +475,18 @@ export function useImportProcess() {
           if (!client.name || client.name.trim() === '') {
             client.name = client.phone;
           }
+
+          // Matcher le centre avec la base de données
+          if (client._raw_center_name || client.center_name) {
+            const centerMatch = await matchCenter(client._raw_center_name || client.center_name);
+            if (centerMatch) {
+              client.center_id = centerMatch.center_id;
+              client.center_name = centerMatch.center_name; // Utilise le nom normalisé de la base
+              console.log(`🔗 Centre matché: "${client._raw_center_name}" → "${centerMatch.center_name}" (${centerMatch.confidence})`);
+            }
+          }
+          // Supprimer le champ temporaire avant l'insertion
+          delete client._raw_center_name;
 
           clientsToInsert.push(client);
         } catch (error) {
@@ -442,9 +514,9 @@ export function useImportProcess() {
             inserted += insertedClients.length;
             
             // Create reminders for each inserted client (2-year rule)
-            // If due_date is within reminder window, send appropriate reminder immediately
+            // If due_date is within 30 days, store for confirmation screen instead of sending immediately
             const remindersToInsert = [];
-            const remindersToUpdate: Array<{ client_id: string; sent_at: string; status: string; current_step: number }> = [];
+            const clientsForReminder: ClientForReminder[] = [];
             
             for (const client of insertedClients) {
               const lastVisit = new Date(client.last_visit);
@@ -474,94 +546,173 @@ export function useImportProcess() {
               // - J-15 to J-7: Send Reminder2 (second reminder)  
               // - J-7 to J-3: Send Reminder3 (third reminder)
               // - J-3 or less: Mark as To_be_called (call required)
-              // This applies to both future dates and overdue dates within the window
               let initialStatus: 'New' | 'Reminder1_sent' | 'Reminder2_sent' | 'Reminder3_sent' | 'To_be_called' = 'New';
               let currentStep = 0;
-              let shouldSendNow = false;
+              let needsReminder = false;
               
               // If due_date is within 30 days (past or future), determine which reminder to send
-              // Logic: J-30 to J-15 window applies to both future and overdue dates
-              // For overdue: if within 30 days after due date, still in Reminder1 window
               if (daysUntilDue <= 30) {
                 // J-30 to J-15: First reminder
-                // This includes: future dates (15 < days <= 30) and overdue dates (if still within 30 days window)
                 if (daysUntilDue > 15 || (daysUntilDue <= 0 && daysUntilDue >= -30)) {
-                  // Future: J-30 to J-15, or Overdue: within 30 days after due date
                   initialStatus = 'Reminder1_sent';
                   currentStep = 1;
-                  shouldSendNow = true;
+                  needsReminder = true;
                 } else if (daysUntilDue > 7) {
                   // J-15 to J-7: Second reminder
                   initialStatus = 'Reminder2_sent';
                   currentStep = 2;
-                  shouldSendNow = true;
+                  needsReminder = true;
                 } else if (daysUntilDue > 3) {
                   // J-7 to J-3: Third reminder
                   initialStatus = 'Reminder3_sent';
                   currentStep = 3;
-                  shouldSendNow = true;
+                  needsReminder = true;
                 } else {
                   // J-3 or less: Call required (or overdue beyond 30 days)
                   initialStatus = 'To_be_called';
                   currentStep = 4;
-                  shouldSendNow = false; // No WhatsApp, just mark for call
+                  needsReminder = false;
                 }
               }
               
-              // Create reminder record
+              // Create reminder record with 'New' status initially if needs reminder (will be updated after confirmation)
               const reminderData = {
                 client_id: client.id,
                 due_date: dueDate,
                 reminder_date: reminderDateStr,
-                status: initialStatus,
+                status: needsReminder ? 'New' : initialStatus, // Set to 'New' if needs reminder, will be updated after confirmation
                 message_template: 'rappel_visite_technique_vf',
-                current_step: currentStep,
+                current_step: needsReminder ? 0 : currentStep,
                 call_required: initialStatus === 'To_be_called',
               };
               
               remindersToInsert.push(reminderData);
               
-              // If we need to send WhatsApp immediately, send it
-              if (shouldSendNow && client.phone) {
-                try {
-                  // Format due date for message
-                  const formattedDueDate = dueDateObj.toLocaleDateString('fr-FR', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  });
-                  
-                  // Send WhatsApp message
-                  const whatsappResult = await sendRappelVisiteTechnique({
-                    to: client.phone,
-                    clientName: client.name || 'Client',
-                    vehicleName: client.vehicle || 'Votre véhicule',
-                    dateEcheance: formattedDueDate,
-                  });
-                  
-                  if (whatsappResult.success) {
-                    console.log(`✅ WhatsApp sent immediately for client ${client.id} (${initialStatus}, due in ${daysUntilDue} days)`);
-                    // Store for update after reminder insertion
-                    remindersToUpdate.push({
-                      client_id: client.id,
-                      sent_at: new Date().toISOString(),
-                      status: initialStatus,
-                      current_step: currentStep,
-                    });
-                  } else {
-                    console.warn(`⚠️ Failed to send WhatsApp for client ${client.id}:`, whatsappResult.error);
-                    // If send fails, change status back to 'New' so cron can retry
-                    reminderData.status = 'New';
-                    reminderData.current_step = 0;
-                    reminderData.call_required = false;
-                  }
-                } catch (error) {
-                  console.error(`❌ Error sending WhatsApp for client ${client.id}:`, error);
-                  // If error, change status back to 'New'
-                  reminderData.status = 'New';
-                  reminderData.current_step = 0;
-                  reminderData.call_required = false;
+              // Store client for reminder confirmation screen if within 30 days window
+              if (needsReminder && client.phone) {
+                clientsForReminder.push({
+                  client_id: client.id,
+                  reminder_id: '', // Will be set after reminder insertion
+                  name: client.name || client.phone,
+                  phone: client.phone,
+                  vehicle: client.vehicle || null,
+                  due_date: dueDate,
+                  daysUntilDue,
+                  initialStatus: initialStatus as 'Reminder1_sent' | 'Reminder2_sent' | 'Reminder3_sent',
+                  currentStep,
+                });
+              }
+            }
+            
+      // Batch insert to Supabase
+      if (clientsToInsert.length > 0) {
+        // Insert in batches of 100
+        const batchSize = 100;
+        const allClientsForReminder: ClientForReminder[] = []; // Accumulate across all batches
+        
+        for (let i = 0; i < clientsToInsert.length; i += batchSize) {
+          const batch = clientsToInsert.slice(i, i + batchSize);
+          
+          const { data: insertedClients, error } = await supabase
+            .from('clients')
+            .insert(batch)
+            .select();
+
+          if (error) {
+            failed += batch.length;
+            errors.push(`Batch insert error: ${error.message}`);
+          } else if (insertedClients && insertedClients.length > 0) {
+            inserted += insertedClients.length;
+            
+            // Create reminders for each inserted client (2-year rule)
+            // If due_date is within 30 days, store for confirmation screen instead of sending immediately
+            const remindersToInsert = [];
+            const batchClientsForReminder: ClientForReminder[] = [];
+            
+            for (const client of insertedClients) {
+              const lastVisit = new Date(client.last_visit);
+              
+              // Calculate next visit = last_visit + 2 years
+              const nextVisit = new Date(lastVisit);
+              nextVisit.setFullYear(nextVisit.getFullYear() + 2);
+              
+              // due_date = next_visit (date limite de visite technique)
+              const dueDate = nextVisit.toISOString().split('T')[0];
+              
+              // reminder_date = due_date - 30 days (date d'envoi de la relance)
+              const reminderDate = new Date(nextVisit);
+              reminderDate.setDate(reminderDate.getDate() - 30);
+              const reminderDateStr = reminderDate.toISOString().split('T')[0];
+              
+              // Check if due_date is within the reminder window
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const dueDateObj = new Date(dueDate);
+              dueDateObj.setHours(0, 0, 0, 0);
+              const daysUntilDue = Math.ceil((dueDateObj.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              
+              // Determine which reminder step to send based on days until due
+              // Logic: 
+              // - J-30 to J-15: Send Reminder1 (first reminder)
+              // - J-15 to J-7: Send Reminder2 (second reminder)  
+              // - J-7 to J-3: Send Reminder3 (third reminder)
+              // - J-3 or less: Mark as To_be_called (call required)
+              let initialStatus: 'New' | 'Reminder1_sent' | 'Reminder2_sent' | 'Reminder3_sent' | 'To_be_called' = 'New';
+              let currentStep = 0;
+              let needsReminder = false;
+              
+              // If due_date is within 30 days (past or future), determine which reminder to send
+              if (daysUntilDue <= 30) {
+                // J-30 to J-15: First reminder
+                if (daysUntilDue > 15 || (daysUntilDue <= 0 && daysUntilDue >= -30)) {
+                  initialStatus = 'Reminder1_sent';
+                  currentStep = 1;
+                  needsReminder = true;
+                } else if (daysUntilDue > 7) {
+                  // J-15 to J-7: Second reminder
+                  initialStatus = 'Reminder2_sent';
+                  currentStep = 2;
+                  needsReminder = true;
+                } else if (daysUntilDue > 3) {
+                  // J-7 to J-3: Third reminder
+                  initialStatus = 'Reminder3_sent';
+                  currentStep = 3;
+                  needsReminder = true;
+                } else {
+                  // J-3 or less: Call required (or overdue beyond 30 days)
+                  initialStatus = 'To_be_called';
+                  currentStep = 4;
+                  needsReminder = false;
                 }
+              }
+              
+              // Create reminder record with 'Pending' status initially if needs reminder (will be updated after confirmation)
+              // Using 'Pending' instead of 'New' to prevent cron job from processing immediately
+              const reminderData = {
+                client_id: client.id,
+                due_date: dueDate,
+                reminder_date: reminderDateStr,
+                status: needsReminder ? 'Pending' : initialStatus, // Use 'Pending' to prevent cron from processing
+                message_template: 'rappel_visite_technique_vf',
+                current_step: needsReminder ? 0 : currentStep,
+                call_required: initialStatus === 'To_be_called',
+              };
+              
+              remindersToInsert.push(reminderData);
+              
+              // Store client for reminder confirmation screen if within 30 days window
+              if (needsReminder && client.phone) {
+                batchClientsForReminder.push({
+                  client_id: client.id,
+                  reminder_id: '', // Will be set after reminder insertion
+                  name: client.name || client.phone,
+                  phone: client.phone,
+                  vehicle: client.vehicle || null,
+                  due_date: dueDate,
+                  daysUntilDue,
+                  initialStatus: initialStatus as 'Reminder1_sent' | 'Reminder2_sent' | 'Reminder3_sent',
+                  currentStep,
+                });
               }
             }
             
@@ -575,21 +726,16 @@ export function useImportProcess() {
               if (reminderError) {
                 console.warn('Failed to create reminders:', reminderError.message);
                 // Don't fail the whole import for reminder creation errors
-              } else if (insertedReminders && remindersToUpdate.length > 0) {
-                // Update reminders that had WhatsApp sent immediately
-                for (const update of remindersToUpdate) {
-                  const reminder = insertedReminders.find(r => r.client_id === update.client_id);
+              } else if (insertedReminders && batchClientsForReminder.length > 0) {
+                // Update reminder_id in batchClientsForReminder
+                for (const clientForReminder of batchClientsForReminder) {
+                  const reminder = insertedReminders.find(r => r.client_id === clientForReminder.client_id);
                   if (reminder) {
-                    await (supabase
-                      .from('reminders') as any)
-                      .update({
-                        sent_at: update.sent_at,
-                        status: update.status,
-                        current_step: update.current_step,
-                      })
-                      .eq('id', reminder.id);
+                    clientForReminder.reminder_id = reminder.id;
                   }
                 }
+                // Accumulate into allClientsForReminder
+                allClientsForReminder.push(...batchClientsForReminder);
               }
             }
           }
@@ -607,6 +753,7 @@ export function useImportProcess() {
         ...prev,
         step: 'complete',
         importResult,
+        clientsForReminder: allClientsForReminder,
         isLoading: false,
       }));
 
@@ -644,10 +791,181 @@ export function useImportProcess() {
       mappings: [],
       validationResult: null,
       importResult: null,
+      clientsForReminder: [],
       isLoading: false,
       error: null,
     });
   }, []);
+
+  // ==========================================
+  // SEND REMINDERS IN BATCH
+  // ==========================================
+
+  const sendRemindersBatch = useCallback(async (clientIds: string[]) => {
+    setState(prev => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      const clientsToSend = state.clientsForReminder.filter(c => clientIds.includes(c.client_id));
+      const remindersToUpdate: Array<{ reminder_id: string; sent_at: string; status: string; current_step: number }> = [];
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const client of clientsToSend) {
+        try {
+          // Récupérer les informations complètes du client depuis la base de données
+          const { data: clientData, error: clientError } = await supabase
+            .from('clients')
+            .select('id, name, phone, vehicle, vehicle_year, last_visit, center_name, center_id')
+            .eq('id', client.client_id)
+            .single();
+
+          if (clientError || !clientData) {
+            console.error(`❌ Error fetching client ${client.client_id}:`, clientError);
+            failCount++;
+            continue;
+          }
+
+          // Récupérer les informations du centre technique
+          let techCenter: { name: string; phone: string | null; short_url: string | null; network: string | null; template_name: string | null } | null = null;
+          
+          if (clientData.center_name || clientData.center_id) {
+            const centerQuery = clientData.center_id 
+              ? supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('id', clientData.center_id).single()
+              : supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('name', clientData.center_name).single();
+            
+            const { data: centerData, error: centerError } = await centerQuery;
+            
+            if (!centerError && centerData) {
+              techCenter = centerData;
+            }
+          }
+
+          // Valeurs par défaut si le centre n'est pas trouvé
+          const nomCentre = techCenter?.name || clientData.center_name || 'Notre centre';
+          const typeCentre = techCenter?.network || 'AUTOSUR'; // Valeur par défaut
+          const shortUrlRendezVous = techCenter?.short_url || '';
+          const numeroAppelCentre = techCenter?.phone || '';
+          const templateName = techCenter?.template_name || undefined; // Utilise le template du centre ou le défaut
+
+          // Préparer les variables du template
+          const datePrecedentVisite = formatDateForMessage(clientData.last_visit);
+          const { marque, modele } = parseVehicle(clientData.vehicle);
+          const immat = ''; // TODO: Ajouter le champ immatriculation dans la table clients si nécessaire
+          const dateProchVis = formatDateForMessage(client.due_date);
+          
+          // Send WhatsApp message avec le template du centre
+          console.log(`📤 Envoi avec template: ${templateName || 'rappel_visite_technique_vf (défaut)'}`);
+          const whatsappResult = await sendRappelVisiteTechnique({
+            to: client.phone,
+            templateName,
+            datePrecedentVisite,
+            marque,
+            modele,
+            immat,
+            dateProchVis,
+            typeCentre,
+            nomCentre,
+            shortUrlRendezVous,
+            numeroAppelCentre,
+          });
+          
+          if (whatsappResult.success) {
+            successCount++;
+            remindersToUpdate.push({
+              reminder_id: client.reminder_id,
+              sent_at: new Date().toISOString(),
+              status: client.initialStatus,
+              current_step: client.currentStep,
+            });
+          } else {
+            failCount++;
+            console.warn(`⚠️ Failed to send WhatsApp for client ${client.client_id}:`, whatsappResult.error);
+          }
+        } catch (error) {
+          failCount++;
+          console.error(`❌ Error sending WhatsApp for client ${client.client_id}:`, error);
+        }
+      }
+
+      // Update reminders that had WhatsApp sent successfully
+      if (remindersToUpdate.length > 0) {
+        for (const update of remindersToUpdate) {
+          await supabase
+            .from('reminders')
+            .update({
+              sent_at: update.sent_at,
+              status: update.status,
+              current_step: update.current_step,
+            })
+            .eq('id', update.reminder_id);
+        }
+      }
+
+      // Update remaining clients that weren't sent - set their status based on daysUntilDue
+      const clientsNotSent = state.clientsForReminder.filter(c => 
+        clientIds.includes(c.client_id) && 
+        !remindersToUpdate.find(u => u.reminder_id === c.reminder_id)
+      );
+
+      for (const client of clientsNotSent) {
+        let finalStatus: 'New' | 'To_be_called' = 'New';
+        let finalStep = 0;
+        if (client.daysUntilDue <= 3) {
+          finalStatus = 'To_be_called';
+          finalStep = 4;
+        }
+        
+        await supabase
+          .from('reminders')
+          .update({
+            status: finalStatus,
+            current_step: finalStep,
+            call_required: finalStatus === 'To_be_called',
+          })
+          .eq('id', client.reminder_id);
+      }
+
+      setState(prev => ({
+        ...prev,
+        clientsForReminder: prev.clientsForReminder.filter(c => !clientIds.includes(c.client_id)),
+        isLoading: false,
+      }));
+
+      return { successCount, failCount };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send reminders';
+      setState(prev => ({ ...prev, isLoading: false, error: message }));
+      throw error;
+    }
+  }, [state.clientsForReminder]);
+
+  const skipReminders = useCallback(async (clientIds: string[]) => {
+    // Update reminders to set their status based on daysUntilDue
+    const clientsToSkip = state.clientsForReminder.filter(c => clientIds.includes(c.client_id));
+
+    for (const client of clientsToSkip) {
+      let finalStatus: 'New' | 'To_be_called' = 'New';
+      let finalStep = 0;
+      if (client.daysUntilDue <= 3) {
+        finalStatus = 'To_be_called';
+        finalStep = 4;
+      }
+      
+      await supabase
+        .from('reminders')
+        .update({
+          status: finalStatus,
+          current_step: finalStep,
+          call_required: finalStatus === 'To_be_called',
+        })
+        .eq('id', client.reminder_id);
+    }
+
+    setState(prev => ({
+      ...prev,
+      clientsForReminder: prev.clientsForReminder.filter(c => !clientIds.includes(c.client_id)),
+    }));
+  }, [state.clientsForReminder]);
 
   const clearError = useCallback(() => {
     setState(prev => ({ ...prev, error: null }));
@@ -679,6 +997,10 @@ export function useImportProcess() {
     
     // Step 4: Upload
     uploadToSupabase,
+    
+    // Reminder confirmation
+    sendRemindersBatch,
+    skipReminders,
     
     // Utilities
     goToStep,

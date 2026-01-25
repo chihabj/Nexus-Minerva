@@ -12,6 +12,7 @@ export default function ImportData() {
     mappings,
     validationResult,
     importResult,
+    clientsForReminder,
     isLoading,
     error,
     parseFile,
@@ -19,6 +20,8 @@ export default function ImportData() {
     autoMatchColumns,
     validateData,
     uploadToSupabase,
+    sendRemindersBatch,
+    skipReminders,
     goToStep,
     reset,
     clearError,
@@ -363,40 +366,147 @@ export default function ImportData() {
   );
 
   // Render complete step
-  const renderCompleteStep = () => (
-    <div className="flex-1 flex items-center justify-center p-8">
-      <div className="bg-white dark:bg-surface-dark rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-12 text-center max-w-md">
-        {importResult?.success ? (
-          <>
-            <span className="material-symbols-outlined text-green-500 text-6xl">celebration</span>
-            <h3 className="text-2xl font-bold mt-4">Import Complete!</h3>
-            <p className="text-slate-500 mt-2">{importResult.inserted} records imported successfully.</p>
-          </>
-        ) : (
-          <>
-            <span className="material-symbols-outlined text-red-500 text-6xl">error</span>
-            <h3 className="text-2xl font-bold mt-4">Import Failed</h3>
-            <p className="text-slate-500 mt-2">
-              {importResult?.inserted || 0} imported, {importResult?.failed || 0} failed.
-            </p>
-            {importResult?.errors && importResult.errors.length > 0 && (
-              <div className="mt-4 text-left bg-red-50 rounded-lg p-4 max-h-32 overflow-auto">
-                {importResult.errors.slice(0, 5).map((err, i) => (
-                  <p key={i} className="text-sm text-red-600">{err}</p>
+  const renderCompleteStep = () => {
+    // If there are clients for reminder confirmation, show confirmation screen
+    if (clientsForReminder.length > 0) {
+      return (
+        <div className="flex-1 overflow-auto p-8 max-w-6xl mx-auto">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-amber-50 dark:bg-amber-900/20">
+              <h3 className="font-bold text-lg flex items-center gap-2 text-amber-700 dark:text-amber-300">
+                <span className="material-symbols-outlined">notifications_active</span>
+                Confirmation d'envoi des relances
+              </h3>
+              <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">
+                {clientsForReminder.length} client{clientsForReminder.length > 1 ? 's' : ''} {clientsForReminder.length > 1 ? 'sont' : 'est'} à moins de 30 jours de l'échéance. 
+                Souhaitez-vous envoyer les relances maintenant ?
+              </p>
+            </div>
+
+            <div className="p-6">
+              <div className="max-h-96 overflow-auto mb-6 space-y-2">
+                {clientsForReminder.map((client) => (
+                  <div
+                    key={client.client_id}
+                    className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-slate-700 dark:text-slate-200">
+                          {client.name}
+                        </span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          {client.phone}
+                        </span>
+                        {client.vehicle && (
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            • {client.vehicle}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400">
+                        <span>
+                          Échéance: {new Date(client.due_date).toLocaleDateString('fr-FR', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric',
+                          })}
+                        </span>
+                        <span className={`font-bold ${
+                          client.daysUntilDue < 0 
+                            ? 'text-red-600 dark:text-red-400' 
+                            : client.daysUntilDue <= 7 
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-green-600 dark:text-green-400'
+                        }`}>
+                          {client.daysUntilDue < 0 
+                            ? `${Math.abs(client.daysUntilDue)} jour${Math.abs(client.daysUntilDue) > 1 ? 's' : ''} de retard`
+                            : `J-${client.daysUntilDue}`
+                          }
+                        </span>
+                        <span className="text-slate-500 dark:text-slate-400">
+                          Relance: {client.initialStatus === 'Reminder1_sent' ? 'J-30' : client.initialStatus === 'Reminder2_sent' ? 'J-15' : 'J-7'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
-            )}
-          </>
-        )}
-        <button
-          onClick={reset}
-          className="mt-6 px-6 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg text-sm font-bold"
-        >
-          Start New Import
-        </button>
+
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  onClick={async () => {
+                    const allClientIds = clientsForReminder.map(c => c.client_id);
+                    await skipReminders(allClientIds);
+                  }}
+                  disabled={isLoading}
+                  className="px-6 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Ne pas envoyer
+                </button>
+                <button
+                  onClick={async () => {
+                    const allClientIds = clientsForReminder.map(c => c.client_id);
+                    await sendRemindersBatch(allClientIds);
+                  }}
+                  disabled={isLoading}
+                  className="px-6 py-2.5 bg-primary hover:bg-primary-dark text-white rounded-lg text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isLoading ? (
+                    <>
+                      <div className="size-4 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
+                      Envoi en cours...
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[18px]">send</span>
+                      Envoyer les relances ({clientsForReminder.length})
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Standard complete screen
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="bg-white dark:bg-surface-dark rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-12 text-center max-w-md">
+          {importResult?.success ? (
+            <>
+              <span className="material-symbols-outlined text-green-500 text-6xl">celebration</span>
+              <h3 className="text-2xl font-bold mt-4">Import Complete!</h3>
+              <p className="text-slate-500 mt-2">{importResult.inserted} records imported successfully.</p>
+            </>
+          ) : (
+            <>
+              <span className="material-symbols-outlined text-red-500 text-6xl">error</span>
+              <h3 className="text-2xl font-bold mt-4">Import Failed</h3>
+              <p className="text-slate-500 mt-2">
+                {importResult?.inserted || 0} imported, {importResult?.failed || 0} failed.
+              </p>
+              {importResult?.errors && importResult.errors.length > 0 && (
+                <div className="mt-4 text-left bg-red-50 rounded-lg p-4 max-h-32 overflow-auto">
+                  {importResult.errors.slice(0, 5).map((err, i) => (
+                    <p key={i} className="text-sm text-red-600">{err}</p>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          <button
+            onClick={reset}
+            className="mt-6 px-6 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg text-sm font-bold"
+          >
+            Start New Import
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Get current step content
   const renderStepContent = () => {

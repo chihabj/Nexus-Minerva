@@ -113,6 +113,9 @@ export interface TechCenter {
   region: string;
   address: string | null;
   phone: string | null;
+  short_url: string | null;  // URL courte pour la réservation en ligne (ex: https://qr1.be/LYBCLW)
+  network: string | null;     // Réseau du centre (ex: SECTA, AUTOSUR)
+  template_name: string | null; // Nom du template WhatsApp spécifique au centre (ex: rappel_autosur__montgeron)
 }
 
 // ClientNote table (for internal notes on clients)

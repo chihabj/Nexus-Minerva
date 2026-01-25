@@ -12,34 +12,38 @@ export interface SendReminderResult {
 }
 
 /**
- * Formate une date pour l'affichage dans le message WhatsApp
+ * Formate une date pour l'affichage dans le message WhatsApp (format DD/MM/YYYY)
  */
 function formatDateForMessage(dateStr: string | null): string {
-  if (!dateStr) return 'Bientôt';
+  if (!dateStr) return 'N/A';
   try {
     const date = new Date(dateStr);
-    return date.toLocaleDateString('fr-FR', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-    });
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
   } catch {
-    return dateStr;
+    return dateStr || 'N/A';
   }
 }
 
 /**
- * Calcule la date d'échéance (last_visit + 2 ans)
+ * Parse le véhicule pour extraire la marque et le modèle
+ * Format attendu: "Marque Modèle" ou "Marque Modèle Année"
  */
-function calculateDueDate(lastVisit: string | null): string {
-  if (!lastVisit) return 'Bientôt';
-  try {
-    const date = new Date(lastVisit);
-    date.setFullYear(date.getFullYear() + 2);
-    return formatDateForMessage(date.toISOString());
-  } catch {
-    return 'Bientôt';
-  }
+function parseVehicle(vehicle: string | null): { marque: string; modele: string } {
+  if (!vehicle) return { marque: 'N/A', modele: 'N/A' };
+  
+  const parts = vehicle.trim().split(/\s+/);
+  if (parts.length === 0) return { marque: 'N/A', modele: 'N/A' };
+  if (parts.length === 1) return { marque: parts[0], modele: 'N/A' };
+  
+  // La première partie est généralement la marque
+  const marque = parts[0];
+  // Le reste est le modèle (peut inclure l'année, mais on prend tout sauf la dernière partie si c'est un nombre)
+  const modele = parts.slice(1).join(' ');
+  
+  return { marque, modele };
 }
 
 /**
@@ -92,7 +96,8 @@ export async function sendReminderAction(
           vehicle,
           vehicle_year,
           last_visit,
-          center_name
+          center_name,
+          center_id
         )
       `)
       .eq('id', reminderId)
@@ -114,27 +119,69 @@ export async function sendReminderAction(
       };
     }
 
-    // 2. Préparer les variables du template
-    const clientName = client.name || 'Client';
-    const vehicleName = client.vehicle 
-      ? `${client.vehicle}${client.vehicle_year ? ` (${client.vehicle_year})` : ''}`
-      : 'votre véhicule';
-    const dateEcheance = reminder.due_date 
+    // 2. Récupérer les informations du centre technique
+    let techCenter: { name: string; phone: string | null; short_url: string | null; network: string | null; template_name: string | null } | null = null;
+    
+    if (client.center_name || client.center_id) {
+      const centerQuery = client.center_id 
+        ? supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('id', client.center_id).single()
+        : supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('name', client.center_name).single();
+      
+      const { data: centerData, error: centerError } = await centerQuery;
+      
+      if (!centerError && centerData) {
+        techCenter = centerData;
+      }
+    }
+
+    // Valeurs par défaut si le centre n'est pas trouvé
+    const nomCentre = techCenter?.name || client.center_name || 'Notre centre';
+    const typeCentre = techCenter?.network || 'AUTOSUR'; // Valeur par défaut
+    const shortUrlRendezVous = techCenter?.short_url || '';
+    const numeroAppelCentre = techCenter?.phone || '';
+    const templateName = techCenter?.template_name || undefined; // Utilise le template du centre ou le défaut
+
+    // 3. Préparer les variables du template
+    const datePrecedentVisite = formatDateForMessage(client.last_visit);
+    const { marque, modele } = parseVehicle(client.vehicle);
+    const immat = ''; // TODO: Ajouter le champ immatriculation dans la table clients si nécessaire
+    const dateProchVis = reminder.due_date 
       ? formatDateForMessage(reminder.due_date)
-      : calculateDueDate(client.last_visit);
+      : (() => {
+          if (!client.last_visit) return 'N/A';
+          try {
+            const date = new Date(client.last_visit);
+            date.setFullYear(date.getFullYear() + 2);
+            return formatDateForMessage(date.toISOString());
+          } catch {
+            return 'N/A';
+          }
+        })();
 
     console.log(`📤 Envoi à ${cleanedPhone}:`, {
-      clientName,
-      vehicleName,
-      dateEcheance,
+      templateName: templateName || 'rappel_visite_technique_vf (défaut)',
+      datePrecedentVisite,
+      marque,
+      modele,
+      immat,
+      dateProchVis,
+      typeCentre,
+      nomCentre,
     });
 
-    // 3. Envoyer le message WhatsApp avec le template rappel_visite_technique
+    // 4. Envoyer le message WhatsApp avec le template du centre (ou template par défaut)
     const whatsappResult: WhatsAppResponse = await sendRappelVisiteTechnique({
       to: cleanedPhone,
-      clientName,
-      vehicleName,
-      dateEcheance,
+      templateName,
+      datePrecedentVisite,
+      marque,
+      modele,
+      immat,
+      dateProchVis,
+      typeCentre,
+      nomCentre,
+      shortUrlRendezVous,
+      numeroAppelCentre,
     });
 
     if (!whatsappResult.success) {
@@ -179,7 +226,7 @@ export async function sendReminderAction(
       .from('client_notes')
       .insert({
         client_id: client.id,
-        content: `Relance WhatsApp envoyée (rappel_visite_technique)\n• Nom: ${clientName}\n• Véhicule: ${vehicleName}\n• Échéance: ${dateEcheance}`,
+        content: `Relance WhatsApp envoyée (rappel_visite_technique)\n• Nom: ${client.name || 'Client'}\n• Véhicule: ${marque} ${modele}\n• Date prochaine visite: ${dateProchVis}`,
         author: 'Système',
         note_type: 'system',
       });

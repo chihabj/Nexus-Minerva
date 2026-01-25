@@ -23,12 +23,22 @@ export default function Clients() {
 
         const { data, error } = await supabase
           .from('clients')
-          .select('*')
+          .select('id, name, email, phone, vehicle, vehicle_year, last_visit, status, region, center_id, center_name, created_at, updated_at')
           .order('created_at', { ascending: false });
 
         if (error) throw error;
         
         console.log('[Clients] Loaded', data?.length, 'clients in', Math.round(performance.now() - startTime), 'ms');
+        // Debug: log first client to check vehicle field
+        if (data && data.length > 0) {
+          console.log('[Clients] Sample client data:', {
+            id: data[0].id,
+            name: data[0].name,
+            vehicle: data[0].vehicle,
+            vehicle_year: data[0].vehicle_year,
+            allFields: Object.keys(data[0])
+          });
+        }
         setClients(data || []);
       } catch (err) {
         console.error('[Clients] Error:', err);

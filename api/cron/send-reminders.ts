@@ -63,29 +63,51 @@ interface ReminderWithClient {
   client_id: string;
   due_date: string;
   status: string;
+  created_at: string;
   client: {
     id: string;
     phone: string;
     name: string | null;
     vehicle: string | null;
+    vehicle_year: number | null;
+    last_visit: string | null;
+    center_name: string | null;
+    center_id: string | null;
   };
 }
 
 /**
- * Send WhatsApp template message using rappel_visite_technique_vf
+ * Interface pour les paramètres d'envoi WhatsApp
+ */
+interface WhatsAppTemplateParams {
+  to: string;
+  templateName: string;
+  datePrecedentVisite: string;
+  marque: string;
+  modele: string;
+  immat: string;
+  dateProchVis: string;
+  typeCentre: string;
+  nomCentre: string;
+  shortUrlRendezVous: string;
+  numeroAppelCentre: string;
+}
+
+/**
+ * Send WhatsApp template message with center-specific template
  */
 async function sendWhatsAppTemplate(
-  to: string,
-  clientName: string,
-  vehicleName: string,
-  dueDate: string
+  params: WhatsAppTemplateParams
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   if (!WHATSAPP_API_TOKEN || !WHATSAPP_PHONE_ID) {
     console.error('Missing WhatsApp credentials');
     return { success: false, error: 'Missing WhatsApp credentials' };
   }
 
-  const cleanedPhone = to.replace(/[^\d]/g, '');
+  const cleanedPhone = params.to.replace(/[^\d]/g, '');
+  const templateName = params.templateName || 'rappel_visite_technique_vf';
+  
+  console.log(`📤 Cron: Envoi avec template ${templateName} à ${cleanedPhone}`);
   
   try {
     const response = await fetch(
@@ -101,28 +123,33 @@ async function sendWhatsAppTemplate(
           to: cleanedPhone,
           type: 'template',
           template: {
-            name: 'rappel_visite_technique_vf',
+            name: templateName,
             language: { code: 'fr' },
             components: [
               {
                 type: 'body',
                 parameters: [
-                  { type: 'text', text: clientName || 'Client' },
-                  { type: 'text', text: vehicleName || 'Votre véhicule' },
-                  { type: 'text', text: dueDate },
+                  { type: 'text', text: params.datePrecedentVisite || 'N/A' },
+                  { type: 'text', text: params.marque || 'N/A' },
+                  { type: 'text', text: params.modele || 'N/A' },
+                  { type: 'text', text: params.immat || 'N/A' },
+                  { type: 'text', text: params.dateProchVis || 'N/A' },
+                  { type: 'text', text: params.typeCentre || 'N/A' },
+                  { type: 'text', text: params.nomCentre || 'N/A' },
                 ],
               },
+              // Boutons (seront ignorés si le template a des boutons fixes)
               {
                 type: 'button',
-                sub_type: 'quick_reply',
+                sub_type: 'url',
                 index: 0,
-                parameters: [{ type: 'payload', payload: 'TAKE_APPOINTMENT' }],
+                parameters: [{ type: 'text', text: params.shortUrlRendezVous || '' }],
               },
               {
                 type: 'button',
-                sub_type: 'quick_reply',
+                sub_type: 'phone_number',
                 index: 1,
-                parameters: [{ type: 'payload', payload: 'CALLBACK_REQUEST' }],
+                parameters: [{ type: 'text', text: params.numeroAppelCentre?.replace(/[^\d]/g, '') || '' }],
               },
             ],
           },
@@ -184,14 +211,45 @@ function getDaysUntilDue(dueDate: string): number {
 }
 
 /**
- * Format date for message
+ * Formate une date pour l'affichage dans le message WhatsApp (format DD/MM/YYYY)
+ */
+function formatDateForMessage(dateStr: string | null): string {
+  if (!dateStr) return 'N/A';
+  try {
+    const date = new Date(dateStr);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch {
+    return dateStr || 'N/A';
+  }
+}
+
+/**
+ * Parse le véhicule pour extraire la marque et le modèle
+ * Format attendu: "Marque Modèle" ou "Marque Modèle Année"
+ */
+function parseVehicle(vehicle: string | null): { marque: string; modele: string } {
+  if (!vehicle) return { marque: 'N/A', modele: 'N/A' };
+  
+  const parts = vehicle.trim().split(/\s+/);
+  if (parts.length === 0) return { marque: 'N/A', modele: 'N/A' };
+  if (parts.length === 1) return { marque: parts[0], modele: 'N/A' };
+  
+  // La première partie est généralement la marque
+  const marque = parts[0];
+  // Le reste est le modèle
+  const modele = parts.slice(1).join(' ');
+  
+  return { marque, modele };
+}
+
+/**
+ * Format date for message (legacy function, kept for compatibility)
  */
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('fr-FR', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
+  return formatDateForMessage(dateStr);
 }
 
 /**
@@ -204,6 +262,9 @@ async function processWorkflowStep(
   console.log(`\n📋 Processing ${step.name} (${step.action})...`);
 
   // Find reminders that match this step's criteria
+  // Exclude reminders created in the last 10 minutes to avoid processing during import
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  
   const { data: reminders, error } = await supabase
     .from('reminders')
     .select(`
@@ -211,9 +272,11 @@ async function processWorkflowStep(
       client_id,
       due_date,
       status,
-      client:clients(id, phone, name, vehicle)
+      created_at,
+      client:clients(id, phone, name, vehicle, vehicle_year, last_visit, center_name, center_id)
     `)
-    .in('status', step.sourceStatuses);
+    .in('status', step.sourceStatuses)
+    .lt('created_at', tenMinutesAgo); // Only process reminders older than 10 minutes
 
   if (error) {
     console.error(`Error fetching reminders for ${step.name}:`, error);
@@ -247,16 +310,49 @@ async function processWorkflowStep(
       continue;
     }
 
-    const formattedDueDate = formatDate(reminder.due_date);
-
     if (step.action === 'whatsapp') {
-      // Send WhatsApp message
-      const result = await sendWhatsAppTemplate(
-        clientData.phone,
-        clientData.name || 'Client',
-        clientData.vehicle || 'Votre véhicule',
-        formattedDueDate
-      );
+      // Récupérer les informations du centre technique avec le template_name
+      let techCenter: { name: string; phone: string | null; short_url: string | null; network: string | null; template_name: string | null } | null = null;
+      
+      if (clientData.center_name || clientData.center_id) {
+        const centerQuery = clientData.center_id 
+          ? supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('id', clientData.center_id).single()
+          : supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('name', clientData.center_name).single();
+        
+        const { data: centerData, error: centerError } = await centerQuery;
+        
+        if (!centerError && centerData) {
+          techCenter = centerData;
+        }
+      }
+
+      // Valeurs par défaut si le centre n'est pas trouvé
+      const nomCentre = techCenter?.name || clientData.center_name || 'Notre centre';
+      const typeCentre = techCenter?.network || 'AUTOSUR';
+      const shortUrlRendezVous = techCenter?.short_url || '';
+      const numeroAppelCentre = techCenter?.phone || '';
+      const templateName = techCenter?.template_name || 'rappel_visite_technique_vf';
+
+      // Préparer les variables du template
+      const datePrecedentVisite = formatDateForMessage(clientData.last_visit);
+      const { marque, modele } = parseVehicle(clientData.vehicle);
+      const immat = ''; // TODO: Ajouter le champ immatriculation si nécessaire
+      const dateProchVis = formatDateForMessage(reminder.due_date);
+
+      // Send WhatsApp message avec le template du centre
+      const result = await sendWhatsAppTemplate({
+        to: clientData.phone,
+        templateName,
+        datePrecedentVisite,
+        marque,
+        modele,
+        immat,
+        dateProchVis,
+        typeCentre,
+        nomCentre,
+        shortUrlRendezVous,
+        numeroAppelCentre,
+      });
 
       if (result.success) {
         // Update reminder status
@@ -308,6 +404,7 @@ async function processWorkflowStep(
       });
 
       // Create notification for agents
+      const formattedDueDate = formatDateForMessage(reminder.due_date);
       await createNotification(
         '📞 Appel requis',
         `${clientData.name || clientData.phone} - Échéance: ${formattedDueDate}`,
