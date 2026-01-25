@@ -127,7 +127,7 @@ async function sendWhatsAppTemplate(
           type: 'template',
           template: {
             name: templateName,
-            language: { code: 'fr' },
+            language: { code: 'en' }, // Templates are registered in English in Meta
             components: [
               {
                 type: 'body',

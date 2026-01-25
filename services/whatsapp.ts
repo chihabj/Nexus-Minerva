@@ -274,7 +274,7 @@ export async function sendRappelVisiteTechnique({
   return sendWhatsAppTemplate({
     to,
     templateName: finalTemplateName,
-    languageCode: 'fr',
+    languageCode: 'en', // Templates are registered in English in Meta
     components,
   });
 }
