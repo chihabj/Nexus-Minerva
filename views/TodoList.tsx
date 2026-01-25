@@ -25,16 +25,29 @@ const STATUS_CONFIG: Record<string, {
   description: string;
   actions: { label: string; status: ReminderStatus; color: string }[];
 }> = {
+  Pending: {
+    label: 'En attente',
+    color: 'text-yellow-700',
+    bgColor: 'bg-yellow-50 border-yellow-200',
+    icon: '⏳',
+    description: 'En attente de réponse du client.',
+    actions: [
+      { label: '✅ RDV Confirmé', status: 'Appointment_confirmed', color: 'bg-green-600 hover:bg-green-700' },
+      { label: '⏸️ À traiter', status: 'Onhold', color: 'bg-orange-500 hover:bg-orange-600' },
+      { label: '📞 À recontacter', status: 'To_be_contacted', color: 'bg-blue-600 hover:bg-blue-700' },
+      { label: '❌ Fermé', status: 'Closed', color: 'bg-gray-600 hover:bg-gray-700' },
+    ],
+  },
   Onhold: {
-    label: 'En attente de traitement',
-    color: 'text-amber-700',
-    bgColor: 'bg-amber-50 border-amber-200',
+    label: 'À traiter',
+    color: 'text-orange-700',
+    bgColor: 'bg-orange-50 border-orange-200',
     icon: '⏸️',
     description: 'Le client a répondu. Décidez de la suite à donner.',
     actions: [
       { label: '✅ RDV Confirmé', status: 'Appointment_confirmed', color: 'bg-green-600 hover:bg-green-700' },
       { label: '📞 À recontacter', status: 'To_be_contacted', color: 'bg-blue-600 hover:bg-blue-700' },
-      { label: '⏳ En attente', status: 'Pending', color: 'bg-amber-500 hover:bg-amber-600' },
+      { label: '⏳ En attente', status: 'Pending', color: 'bg-yellow-500 hover:bg-yellow-600' },
       { label: '❌ Fermé', status: 'Closed', color: 'bg-gray-600 hover:bg-gray-700' },
     ],
   },
@@ -100,7 +113,7 @@ export default function TodoList() {
       const { data, error: fetchError } = await supabase
         .from('reminders')
         .select('*, client:clients(*)')
-        .in('status', ['Onhold', 'To_be_called', 'To_be_contacted'])
+        .in('status', ['Pending', 'Onhold', 'To_be_called', 'To_be_contacted'])
         .order('due_date', { ascending: true });
 
       if (fetchError) throw fetchError;
@@ -145,7 +158,7 @@ export default function TodoList() {
       if (updateError) throw updateError;
 
       // Remove from list (since it's no longer in the action-required statuses)
-      if (!['Onhold', 'To_be_called', 'To_be_contacted'].includes(newStatus)) {
+      if (!['Pending', 'Onhold', 'To_be_called', 'To_be_contacted'].includes(newStatus)) {
         setReminders(prev => prev.filter(r => r.id !== reminderId));
       } else {
         // Update the status in place
@@ -179,6 +192,7 @@ export default function TodoList() {
   // Count by status
   const counts = {
     all: reminders.length,
+    Pending: reminders.filter(r => r.status === 'Pending').length,
     Onhold: reminders.filter(r => r.status === 'Onhold').length,
     To_be_called: reminders.filter(r => r.status === 'To_be_called').length,
     To_be_contacted: reminders.filter(r => r.status === 'To_be_contacted').length,
@@ -221,7 +235,7 @@ export default function TodoList() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <button
           onClick={() => setActiveTab('all')}
           className={`p-4 rounded-xl border-2 transition-all ${
@@ -235,15 +249,27 @@ export default function TodoList() {
         </button>
         
         <button
-          onClick={() => setActiveTab('Onhold')}
+          onClick={() => setActiveTab('Pending')}
           className={`p-4 rounded-xl border-2 transition-all ${
-            activeTab === 'Onhold' 
-              ? 'border-amber-500 bg-amber-50' 
+            activeTab === 'Pending' 
+              ? 'border-yellow-500 bg-yellow-50' 
               : 'border-gray-200 bg-white hover:border-gray-300'
           }`}
         >
-          <div className="text-3xl font-bold text-amber-600">{counts.Onhold}</div>
-          <div className="text-sm text-gray-500">⏸️ En attente</div>
+          <div className="text-3xl font-bold text-yellow-600">{counts.Pending}</div>
+          <div className="text-sm text-gray-500">⏳ En attente</div>
+        </button>
+        
+        <button
+          onClick={() => setActiveTab('Onhold')}
+          className={`p-4 rounded-xl border-2 transition-all ${
+            activeTab === 'Onhold' 
+              ? 'border-orange-500 bg-orange-50' 
+              : 'border-gray-200 bg-white hover:border-gray-300'
+          }`}
+        >
+          <div className="text-3xl font-bold text-orange-600">{counts.Onhold}</div>
+          <div className="text-sm text-gray-500">⏸️ À traiter</div>
         </button>
         
         <button
