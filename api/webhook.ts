@@ -438,7 +438,13 @@ async function updateMessageStatus(
           note_type: 'system',
         });
 
-      console.log(`📝 Note added for client ${conversation.client_id}`);
+      // Désactiver WhatsApp pour ce client
+      await supabase
+        .from('clients')
+        .update({ whatsapp_available: false })
+        .eq('id', conversation.client_id);
+
+      console.log(`📝 Note added and WhatsApp disabled for client ${conversation.client_id}`);
     }
   }
 }

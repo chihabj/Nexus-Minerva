@@ -41,6 +41,7 @@ export interface Client {
   marque: string | null;          // Marque du véhicule (ex: Peugeot, Renault)
   modele: string | null;          // Modèle du véhicule (ex: 308, Clio)
   immatriculation: string | null; // Plaque d'immatriculation (ex: AB-123-CD)
+  whatsapp_available: boolean;    // Indique si le numéro est joignable par WhatsApp
   vin: string | null;             // Numéro de châssis / Vehicle Identification Number
   last_visit: string | null;
   status: ReminderStatus;

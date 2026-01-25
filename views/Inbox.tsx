@@ -427,9 +427,18 @@ export default function Inbox() {
     };
   }, [selectedConversation, fetchConversations, fetchConversationsWithInboundMessages]);
 
+  // Check if WhatsApp is available for the selected conversation
+  const isWhatsAppAvailable = selectedConversation?.client?.whatsapp_available !== false;
+
   // Send message
   const handleSend = async () => {
     if (!input.trim() || !selectedConversation || sending) return;
+
+    // Block sending if WhatsApp is not available for this client
+    if (!isWhatsAppAvailable) {
+      setToast({ type: 'error', message: 'WhatsApp non disponible pour ce numéro' });
+      return;
+    }
 
     const messageText = input.trim();
     setInput('');
@@ -876,13 +885,25 @@ export default function Inbox() {
               </div>
             )}
 
+            {/* WhatsApp unavailable warning */}
+            {!isWhatsAppAvailable && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-3 flex items-center gap-3">
+                <span className="material-symbols-outlined text-red-500">warning</span>
+                <div>
+                  <p className="text-sm font-medium text-red-700">WhatsApp non disponible</p>
+                  <p className="text-xs text-red-600">Ce numéro n'est pas joignable par WhatsApp. Utilisez l'appel téléphonique.</p>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-end gap-3">
-              <div className="flex-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1.5 border border-transparent focus-within:border-primary/50 flex items-center">
+              <div className={`flex-1 rounded-xl p-1.5 border border-transparent focus-within:border-primary/50 flex items-center ${!isWhatsAppAvailable ? 'bg-slate-200 dark:bg-slate-700 opacity-60' : 'bg-slate-100 dark:bg-slate-800'}`}>
                 {/* Quick Replies Button */}
                 <button 
                   onClick={() => setShowQuickReplies(!showQuickReplies)}
                   className={`p-2 transition-all ${showQuickReplies ? 'text-primary' : 'text-slate-400 hover:text-primary'}`}
                   title="Réponses rapides (raccourcis: /rdv, /merci...)"
+                  disabled={!isWhatsAppAvailable}
                 >
                   <span className="material-symbols-outlined">bolt</span>
                 </button>
@@ -890,24 +911,25 @@ export default function Inbox() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                  placeholder="Écrivez ou tapez / pour les raccourcis..." 
+                  placeholder={isWhatsAppAvailable ? "Écrivez ou tapez / pour les raccourcis..." : "WhatsApp non disponible pour ce numéro"} 
                   className="w-full bg-transparent border-none focus:ring-0 text-sm py-2 resize-none max-h-32"
                   rows={1}
-                  disabled={sending}
+                  disabled={sending || !isWhatsAppAvailable}
                 />
-                <button className="p-2 text-slate-400 hover:text-slate-600 transition-all">
+                <button className="p-2 text-slate-400 hover:text-slate-600 transition-all" disabled={!isWhatsAppAvailable}>
                   <span className="material-symbols-outlined">sentiment_satisfied</span>
                 </button>
               </div>
               <button 
                 onClick={handleSend}
-                className="bg-primary hover:bg-primary-dark text-white p-3 rounded-xl shadow-lg shadow-primary/30 transition-all disabled:opacity-50"
-                disabled={!input.trim() || sending}
+                className={`p-3 rounded-xl shadow-lg transition-all disabled:opacity-50 ${!isWhatsAppAvailable ? 'bg-slate-400 cursor-not-allowed' : 'bg-primary hover:bg-primary-dark text-white shadow-primary/30'}`}
+                disabled={!input.trim() || sending || !isWhatsAppAvailable}
+                title={!isWhatsAppAvailable ? 'WhatsApp non disponible' : 'Envoyer'}
               >
                 {sending ? (
                   <div className="size-5 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
                 ) : (
-                  <span className="material-symbols-outlined">send</span>
+                  <span className="material-symbols-outlined text-white">send</span>
                 )}
               </button>
             </div>
