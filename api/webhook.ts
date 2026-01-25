@@ -428,14 +428,15 @@ async function updateMessageStatus(
     if (conversation?.client_id) {
       // Seulement si c'est une erreur définitive (pas de WhatsApp)
       if (hasNoWhatsApp) {
-        console.log(`🔍 Looking for reminder with client_id=${conversation.client_id} and status in [Reminder1_sent, Reminder2_sent, Reminder3_sent]`);
+        console.log(`🔍 Looking for reminder with client_id=${conversation.client_id}`);
         
         // Mettre à jour le reminder en "To_be_called"
+        // Note: On inclut 'Pending' car le webhook peut arriver AVANT que l'import ait fini de mettre à jour le status
         const { data: reminder, error: reminderError } = await supabase
           .from('reminders')
           .select('id, status')
           .eq('client_id', conversation.client_id)
-          .in('status', ['Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'])
+          .in('status', ['Pending', 'Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'])
           .order('created_at', { ascending: false })
           .limit(1)
           .single();
