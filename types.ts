@@ -59,6 +59,7 @@ export interface Reminder {
   due_date: string;           // Date d'échéance (last_visit + 2 ans)
   reminder_date: string;      // Date d'envoi (due_date - 30 jours)
   status: ReminderStatus;
+  status_changed_at: string;  // Date du dernier changement de statut (pour KPIs)
   message: string | null;
   message_template: string | null;
   // Workflow tracking
@@ -207,6 +208,85 @@ export interface MessageTemplate {
   is_active: boolean;
   sort_order: number;
 }
+
+// ===========================================
+// DASHBOARD TYPES
+// ===========================================
+
+// Dashboard KPIs structure
+export interface DashboardKPIs {
+  overdueCount: number;        // Cas en retard (due_date < aujourd'hui)
+  due7DaysCount: number;       // Pipeline ≤7 jours
+  due30DaysCount: number;      // Pipeline ≤30 jours
+  confirmedTodayCount: number; // Confirmés aujourd'hui
+  actionsWaitingCount: number; // Actions en attente (Onhold, To_be_called, To_be_contacted, failed delivery)
+  stagnant7DaysCount: number;  // Stagnants >7 jours
+  stagnant14DaysCount: number; // Stagnants >14 jours
+  totalActive: number;         // Total des cas actifs
+}
+
+// Urgency levels for sorting
+export type UrgencyLevel = 1 | 2 | 3 | 4 | 5;
+// 1 = RETARD (overdue)
+// 2 = TRÈS URGENT (≤3 jours)
+// 3 = URGENT (≤7 jours)
+// 4 = STAGNANT (>7 jours sans changement)
+// 5 = NORMAL
+
+// Urgent action item for dashboard table
+export interface UrgentActionItem {
+  reminderId: string;
+  clientId: string;
+  clientName: string | null;
+  phone: string | null;
+  centerId: string | null;
+  centerName: string | null;
+  whatsappAvailable: boolean;
+  dueDate: string;
+  daysUntilDue: number;       // négatif si retard
+  status: ReminderStatus;
+  statusChangedAt: string;
+  lastActionAt: string | null;
+  lastReminderSent: 'J30' | 'J15' | 'J7' | null;
+  urgencyLevel: UrgencyLevel;
+  isNoReply: boolean;         // déduit dynamiquement
+}
+
+// Pipeline item for 30-day table
+export interface PipelineItem {
+  reminderId: string;
+  clientId: string;
+  clientName: string | null;
+  phone: string | null;
+  centerName: string | null;
+  marque: string | null;
+  modele: string | null;
+  immatriculation: string | null;
+  whatsappAvailable: boolean;
+  dueDate: string;
+  daysRemaining: number;
+  status: ReminderStatus;
+  lastReminderSent: 'J30' | 'J15' | 'J7' | null;
+}
+
+// KPI filter types for clicking on cards
+export type KPIFilter = 
+  | 'all'
+  | 'overdue' 
+  | 'due_7_days' 
+  | 'due_30_days' 
+  | 'confirmed_today' 
+  | 'actions_waiting' 
+  | 'stagnant';
+
+// Final statuses (excluded from active pipeline)
+export const FINAL_STATUSES: ReminderStatus[] = ['Appointment_confirmed', 'Closed', 'Completed'];
+
+// Action-required statuses
+export const ACTION_STATUSES: ReminderStatus[] = ['To_be_contacted', 'Onhold', 'To_be_called'];
+
+// Reminder-sent statuses (for "No Reply" detection)
+export const REMINDER_SENT_STATUSES: ReminderStatus[] = ['Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'];
 
 // ===========================================
 // SUPABASE DATABASE TYPE HELPER
