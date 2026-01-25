@@ -364,18 +364,82 @@ async function saveIncomingMessage(
 }
 
 /**
- * Update message status (sent/delivered/read)
+ * Update message status (sent/delivered/read/failed)
  */
-async function updateMessageStatus(waMessageId: string, status: string) {
-  const { error } = await supabase
+async function updateMessageStatus(
+  waMessageId: string, 
+  status: string, 
+  errors?: Array<{ code: number; title: string }>,
+  recipientPhone?: string
+) {
+  // Update message status
+  const updateData: any = { status };
+  
+  // If failed, add error message
+  if (status === 'failed' && errors && errors.length > 0) {
+    updateData.error_message = errors.map(e => `[${e.code}] ${e.title}`).join('; ');
+  }
+
+  const { data: message, error } = await supabase
     .from('messages')
-    .update({ status })
-    .eq('wa_message_id', waMessageId);
+    .update(updateData)
+    .eq('wa_message_id', waMessageId)
+    .select('id, conversation_id, template_name')
+    .single();
 
   if (error) {
     console.error('Error updating message status:', error);
-  } else {
-    console.log(`✅ Message ${waMessageId} status updated to ${status}`);
+    return;
+  }
+  
+  console.log(`✅ Message ${waMessageId} status updated to ${status}`);
+
+  // Si le message a échoué, mettre à jour le reminder et ajouter une note
+  if (status === 'failed' && message) {
+    const errorText = errors?.map(e => `[${e.code}] ${e.title}`).join('; ') || 'Erreur inconnue';
+    
+    // Trouver le client via la conversation
+    const { data: conversation } = await supabase
+      .from('conversations')
+      .select('client_id, client_phone, client_name')
+      .eq('id', message.conversation_id)
+      .single();
+
+    if (conversation?.client_id) {
+      // Mettre à jour le reminder en "Failed"
+      const { data: reminder } = await supabase
+        .from('reminders')
+        .select('id, status')
+        .eq('client_id', conversation.client_id)
+        .in('status', ['Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (reminder) {
+        await supabase
+          .from('reminders')
+          .update({ 
+            status: 'Failed',
+            message: `WhatsApp non délivré: ${errorText}`
+          })
+          .eq('id', reminder.id);
+
+        console.log(`⚠️ Reminder ${reminder.id} marked as Failed`);
+      }
+
+      // Ajouter une note système
+      await supabase
+        .from('client_notes')
+        .insert({
+          client_id: conversation.client_id,
+          content: `❌ Échec de livraison WhatsApp\n• Destinataire: ${conversation.client_phone}\n• Erreur: ${errorText}\n• Cause probable: Le numéro n'a pas WhatsApp ou a bloqué les messages`,
+          author: 'Système',
+          note_type: 'system',
+        });
+
+      console.log(`📝 Note added for client ${conversation.client_id}`);
+    }
   }
 }
 
@@ -411,11 +475,11 @@ async function handleIncomingWebhook(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-        // Process status updates (sent, delivered, read)
+        // Process status updates (sent, delivered, read, failed)
         if (value.statuses && value.statuses.length > 0) {
           for (const status of value.statuses) {
-            console.log(`📊 Status update for ${status.id}: ${status.status}`);
-            await updateMessageStatus(status.id, status.status);
+            console.log(`📊 Status update for ${status.id}: ${status.status}${status.errors ? ` - Errors: ${JSON.stringify(status.errors)}` : ''}`);
+            await updateMessageStatus(status.id, status.status, status.errors, status.recipient_id);
           }
         }
       }
