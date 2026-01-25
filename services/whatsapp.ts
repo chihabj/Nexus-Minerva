@@ -269,13 +269,21 @@ export async function sendRappelVisiteTechnique({
     },
   ];
 
-  console.log(`📤 Utilisation du template: ${finalTemplateName}`);
+  // Pour les templates par centre (avec boutons statiques), ne pas envoyer les composants de boutons
+  // Les boutons URL et téléphone sont statiques et définis lors de la création du template
+  const hasStaticButtons = templateName && templateName !== 'rappel_visite_technique_vf';
+  
+  const finalComponents = hasStaticButtons 
+    ? components.filter(c => c.type !== 'button') // Seulement le body
+    : components; // Tous les composants pour le template par défaut
+
+  console.log(`📤 Utilisation du template: ${finalTemplateName} (boutons statiques: ${hasStaticButtons})`);
 
   return sendWhatsAppTemplate({
     to,
     templateName: finalTemplateName,
     languageCode: 'en', // Templates are registered in English in Meta
-    components,
+    components: finalComponents,
   });
 }
 
