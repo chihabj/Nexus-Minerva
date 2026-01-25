@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
 import { sendTextMessage } from '../services/whatsapp';
 import type { Conversation, Message, Reminder, ReminderStatus, MessageTemplate } from '../types';
@@ -72,6 +73,7 @@ const FILTER_CATEGORIES: Record<FilterCategory, {
 };
 
 export default function Inbox() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -91,6 +93,7 @@ export default function Inbox() {
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [conversationReminders, setConversationReminders] = useState<Record<string, Reminder>>({});
   const [conversationsWithInboundMessages, setConversationsWithInboundMessages] = useState<Set<string>>(new Set());
+  const [autoSelectPending, setAutoSelectPending] = useState<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -334,6 +337,44 @@ export default function Inbox() {
     fetchConversations();
     fetchTemplates();
   }, [fetchConversations, fetchTemplates]);
+
+  // Handle URL param to auto-select conversation by phone
+  useEffect(() => {
+    const phoneParam = searchParams.get('phone');
+    if (phoneParam && conversations.length > 0 && !selectedConversation) {
+      // Normalize phone for comparison
+      const normalizedParam = phoneParam.replace(/[^0-9]/g, '');
+      const matchingConv = conversations.find(c => {
+        const convPhone = c.client_phone.replace(/[^0-9]/g, '');
+        return convPhone === normalizedParam || convPhone.endsWith(normalizedParam) || normalizedParam.endsWith(convPhone);
+      });
+      
+      if (matchingConv) {
+        setSelectedConversation(matchingConv);
+        // Clear the URL param after selection
+        setSearchParams({});
+      } else {
+        // Store for later when conversations load
+        setAutoSelectPending(normalizedParam);
+      }
+    }
+  }, [searchParams, conversations, selectedConversation, setSearchParams]);
+
+  // Handle pending auto-select after conversations load
+  useEffect(() => {
+    if (autoSelectPending && conversations.length > 0) {
+      const matchingConv = conversations.find(c => {
+        const convPhone = c.client_phone.replace(/[^0-9]/g, '');
+        return convPhone === autoSelectPending || convPhone.endsWith(autoSelectPending) || autoSelectPending.endsWith(convPhone);
+      });
+      
+      if (matchingConv) {
+        setSelectedConversation(matchingConv);
+        setAutoSelectPending(null);
+        setSearchParams({});
+      }
+    }
+  }, [autoSelectPending, conversations, setSearchParams]);
 
   // Load reminders for all conversations when they change
   useEffect(() => {

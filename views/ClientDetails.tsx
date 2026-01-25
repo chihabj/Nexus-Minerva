@@ -176,14 +176,10 @@ export default function ClientDetails() {
     }
   };
 
-  // Open WhatsApp
+  // Open WhatsApp conversation in Messages
   const openWhatsApp = () => {
     if (!client?.phone) return;
-    const cleanPhone = client.phone.replace(/\s/g, '').replace(/^00/, '+').replace('+', '');
-    const message = encodeURIComponent(
-      `Bonjour ${client.name || ''},\n\nVotre contrôle technique arrive à échéance.\n\nMerci de prendre rendez-vous.\n\nCordialement`
-    );
-    window.open(`https://wa.me/${cleanPhone}?text=${message}`, '_blank');
+    navigate(`/inbox?phone=${encodeURIComponent(client.phone)}`);
   };
 
   // Build timeline from reminders and notes
@@ -325,7 +321,7 @@ export default function ClientDetails() {
             </div>
             
             <div className="flex items-center gap-3">
-              {client.phone && (
+              {client.phone && client.whatsapp_available !== false && (
                 <button
                   onClick={openWhatsApp}
                   className="flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl font-medium transition-colors"
@@ -335,6 +331,15 @@ export default function ClientDetails() {
                   </svg>
                   WhatsApp
                 </button>
+              )}
+              {client.phone && (
+                <a
+                  href={`tel:${client.phone}`}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium transition-colors"
+                >
+                  <span className="material-symbols-outlined text-xl">call</span>
+                  Appeler
+                </a>
               )}
               <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
                 <span className="material-symbols-outlined">more_vert</span>

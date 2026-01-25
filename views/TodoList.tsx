@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
 import type { Reminder, Client, ReminderStatus } from '../types';
 
@@ -83,6 +83,7 @@ function getDaysUntilDue(dueDate: string): number {
 }
 
 export default function TodoList() {
+  const navigate = useNavigate();
   const [reminders, setReminders] = useState<ReminderWithClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -391,20 +392,14 @@ export default function TodoList() {
                 <div className="flex-1" />
                 
                 {/* Quick Actions */}
-                {reminder.client?.whatsapp_available !== false ? (
-                  <a
-                    href={`https://wa.me/${reminder.client?.phone?.replace(/[^0-9]/g, '')}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                {reminder.client?.whatsapp_available !== false && reminder.client?.phone ? (
+                  <button
+                    onClick={() => navigate(`/inbox?phone=${encodeURIComponent(reminder.client?.phone || '')}`)}
                     className="px-3 py-1.5 rounded-lg bg-green-100 text-green-700 text-sm font-medium hover:bg-green-200 transition-colors"
                   >
                     💬 WhatsApp
-                  </a>
-                ) : (
-                  <span className="px-3 py-1.5 rounded-lg bg-gray-200 text-gray-400 text-sm font-medium cursor-not-allowed">
-                    💬 WhatsApp indisponible
-                  </span>
-                )}
+                  </button>
+                ) : null}
                 <a
                   href={`tel:${reminder.client?.phone}`}
                   className="px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 text-sm font-medium hover:bg-blue-200 transition-colors"
