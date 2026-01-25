@@ -394,9 +394,18 @@ async function updateMessageStatus(
   
   console.log(`✅ Message ${waMessageId} status updated to ${status}`);
 
-  // Si le message a échoué, mettre à jour le reminder et ajouter une note
+  // Si le message a échoué, analyser le type d'erreur
   if (status === 'failed' && message) {
     const errorText = errors?.map(e => `[${e.code}] ${e.title}`).join('; ') || 'Erreur inconnue';
+    
+    // Codes d'erreur qui signifient "numéro sans WhatsApp" (désactiver définitivement)
+    const noWhatsAppCodes = [131026]; // Message undeliverable
+    
+    // Codes d'erreur temporaires (spam protection, rate limiting) - ne pas désactiver
+    const temporaryCodes = [131049, 131047, 131048]; // Ecosystem engagement, rate limits
+    
+    const hasNoWhatsApp = errors?.some(e => noWhatsAppCodes.includes(e.code));
+    const isTemporaryError = errors?.some(e => temporaryCodes.includes(e.code));
     
     // Trouver le client via la conversation
     const { data: conversation } = await supabase
@@ -406,47 +415,65 @@ async function updateMessageStatus(
       .single();
 
     if (conversation?.client_id) {
-      // Mettre à jour le reminder en "Failed"
-      const { data: reminder } = await supabase
-        .from('reminders')
-        .select('id, status')
-        .eq('client_id', conversation.client_id)
-        .in('status', ['Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (reminder) {
-        // Passer à "To_be_called" pour que ça apparaisse dans la Todo List
-        await supabase
+      // Seulement si c'est une erreur définitive (pas de WhatsApp)
+      if (hasNoWhatsApp) {
+        // Mettre à jour le reminder en "To_be_called"
+        const { data: reminder } = await supabase
           .from('reminders')
-          .update({ 
-            status: 'To_be_called',
-            call_required: true,
-            message: `WhatsApp non délivré: ${errorText} - Appel requis`
-          })
-          .eq('id', reminder.id);
+          .select('id, status')
+          .eq('client_id', conversation.client_id)
+          .in('status', ['Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
 
-        console.log(`⚠️ Reminder ${reminder.id} marked as To_be_called (WhatsApp failed)`);
+        if (reminder) {
+          await supabase
+            .from('reminders')
+            .update({ 
+              status: 'To_be_called',
+              call_required: true,
+              message: `WhatsApp non délivré: ${errorText} - Appel requis`
+            })
+            .eq('id', reminder.id);
+
+          console.log(`⚠️ Reminder ${reminder.id} marked as To_be_called (no WhatsApp)`);
+        }
+
+        // Ajouter une note système
+        await supabase
+          .from('client_notes')
+          .insert({
+            client_id: conversation.client_id,
+            content: `❌ Numéro sans WhatsApp\n• Destinataire: ${conversation.client_phone}\n• Erreur: ${errorText}\n• Action: WhatsApp désactivé, appel requis`,
+            author: 'Système',
+            note_type: 'system',
+          });
+
+        // Désactiver WhatsApp pour ce client
+        await supabase
+          .from('clients')
+          .update({ whatsapp_available: false })
+          .eq('id', conversation.client_id);
+
+        console.log(`📝 WhatsApp disabled for client ${conversation.client_id} (no WhatsApp)`);
+        
+      } else if (isTemporaryError) {
+        // Erreur temporaire - juste une note, ne pas désactiver WhatsApp
+        console.log(`⚠️ Temporary delivery error for ${conversation.client_phone}: ${errorText}`);
+        
+        await supabase
+          .from('client_notes')
+          .insert({
+            client_id: conversation.client_id,
+            content: `⚠️ Message WhatsApp non délivré (temporaire)\n• Destinataire: ${conversation.client_phone}\n• Erreur: ${errorText}\n• Cause: Protection anti-spam Meta - Réessayer plus tard`,
+            author: 'Système',
+            note_type: 'system',
+          });
+      } else {
+        // Autre erreur - noter mais ne pas désactiver
+        console.log(`⚠️ Unknown delivery error for ${conversation.client_phone}: ${errorText}`);
       }
-
-      // Ajouter une note système
-      await supabase
-        .from('client_notes')
-        .insert({
-          client_id: conversation.client_id,
-          content: `❌ Échec de livraison WhatsApp\n• Destinataire: ${conversation.client_phone}\n• Erreur: ${errorText}\n• Cause probable: Le numéro n'a pas WhatsApp ou a bloqué les messages`,
-          author: 'Système',
-          note_type: 'system',
-        });
-
-      // Désactiver WhatsApp pour ce client
-      await supabase
-        .from('clients')
-        .update({ whatsapp_available: false })
-        .eq('id', conversation.client_id);
-
-      console.log(`📝 Note added and WhatsApp disabled for client ${conversation.client_id}`);
     }
   }
 }
