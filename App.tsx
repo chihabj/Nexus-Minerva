@@ -10,6 +10,7 @@ import ClientDetails from './views/ClientDetails';
 import TodoList from './views/TodoList';
 import Login from './views/Login';
 import Settings from './views/Settings';
+import Documentation from './views/Documentation';
 import { supabase } from './services/supabaseClient';
 import type { Notification } from './types';
 
@@ -316,6 +317,7 @@ function AppContent() {
             <Route path="/clients/:id" element={<ProtectedRoute><ClientDetails /></ProtectedRoute>} />
             <Route path="/centers" element={<ProtectedRoute allowedRoles={['admin']}><Centers /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute allowedRoles={['superadmin']}><Settings /></ProtectedRoute>} />
+            <Route path="/documentation" element={<ProtectedRoute><Documentation /></ProtectedRoute>} />
             <Route path="/login" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
