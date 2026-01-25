@@ -95,23 +95,27 @@ async function handleVerification(req: VercelRequest, res: VercelResponse) {
 async function getOrCreateConversation(phone: string, contactName?: string) {
   // Clean phone number (remove + if present)
   const cleanPhone = phone.startsWith('+') ? phone.substring(1) : phone;
+  const phoneWithPlus = phone.startsWith('+') ? phone : `+${phone}`;
   
-  // Try to find existing conversation
+  // Try to find existing conversation (check both formats: with and without +)
   const { data: existing } = await supabase
     .from('conversations')
     .select('*')
-    .eq('client_phone', cleanPhone)
+    .or(`client_phone.eq.${cleanPhone},client_phone.eq.${phoneWithPlus}`)
+    .limit(1)
     .single();
 
   if (existing) {
+    console.log(`✅ Found existing conversation for ${phone}: ${existing.id}`);
     return existing;
   }
 
-  // Try to find client by phone
+  // Try to find client by phone (check both formats)
   const { data: client } = await supabase
     .from('clients')
     .select('id, name, phone')
-    .or(`phone.eq.${cleanPhone},phone.eq.+${cleanPhone}`)
+    .or(`phone.eq.${cleanPhone},phone.eq.${phoneWithPlus}`)
+    .limit(1)
     .single();
 
   // Create new conversation
@@ -398,14 +402,19 @@ async function updateMessageStatus(
   if (status === 'failed' && message) {
     const errorText = errors?.map(e => `[${e.code}] ${e.title}`).join('; ') || 'Erreur inconnue';
     
+    console.log(`🔍 Processing failed message. Errors:`, JSON.stringify(errors));
+    
     // Codes d'erreur qui signifient "numéro sans WhatsApp" (désactiver définitivement)
     const noWhatsAppCodes = [131026]; // Message undeliverable
     
     // Codes d'erreur temporaires (spam protection, rate limiting) - ne pas désactiver
     const temporaryCodes = [131049, 131047, 131048]; // Ecosystem engagement, rate limits
     
-    const hasNoWhatsApp = errors?.some(e => noWhatsAppCodes.includes(e.code));
-    const isTemporaryError = errors?.some(e => temporaryCodes.includes(e.code));
+    // Convert error codes to numbers for comparison (Meta sometimes sends strings)
+    const hasNoWhatsApp = errors?.some(e => noWhatsAppCodes.includes(Number(e.code)));
+    const isTemporaryError = errors?.some(e => temporaryCodes.includes(Number(e.code)));
+    
+    console.log(`🔍 hasNoWhatsApp: ${hasNoWhatsApp}, isTemporaryError: ${isTemporaryError}`);
     
     // Trouver le client via la conversation
     const { data: conversation } = await supabase
@@ -414,11 +423,15 @@ async function updateMessageStatus(
       .eq('id', message.conversation_id)
       .single();
 
+    console.log(`🔍 Conversation found:`, conversation ? `client_id=${conversation.client_id}` : 'NOT FOUND');
+    
     if (conversation?.client_id) {
       // Seulement si c'est une erreur définitive (pas de WhatsApp)
       if (hasNoWhatsApp) {
+        console.log(`🔍 Looking for reminder with client_id=${conversation.client_id} and status in [Reminder1_sent, Reminder2_sent, Reminder3_sent]`);
+        
         // Mettre à jour le reminder en "To_be_called"
-        const { data: reminder } = await supabase
+        const { data: reminder, error: reminderError } = await supabase
           .from('reminders')
           .select('id, status')
           .eq('client_id', conversation.client_id)
@@ -426,6 +439,8 @@ async function updateMessageStatus(
           .order('created_at', { ascending: false })
           .limit(1)
           .single();
+
+        console.log(`🔍 Reminder found:`, reminder ? `id=${reminder.id}, status=${reminder.status}` : `NOT FOUND (error: ${reminderError?.message})`);
 
         if (reminder) {
           await supabase
