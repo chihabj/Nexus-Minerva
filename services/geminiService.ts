@@ -3,6 +3,10 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
+/**
+ * Uses Gemini AI to suggest mappings between CSV headers and database fields
+ * Used in ImportData for smart column mapping
+ */
 export const getSmartMappingSuggestions = async (csvHeaders: string[], dbFields: string[]) => {
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
@@ -19,22 +23,6 @@ export const getSmartMappingSuggestions = async (csvHeaders: string[], dbFields:
             confidence: { type: Type.STRING, enum: ['High', 'Low', 'None'] }
           }
         }
-      }
-    }
-  });
-
-  return JSON.parse(response.text || '[]');
-};
-
-export const getSmartReplySuggestions = async (chatHistory: string) => {
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: `Based on this chat history, suggest 3 quick professional replies for a technical service agent: ${chatHistory}`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING }
       }
     }
   });
