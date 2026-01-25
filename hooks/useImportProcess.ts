@@ -784,12 +784,82 @@ export function useImportProcess() {
           
           if (whatsappResult.success) {
             successCount++;
+            const sentAt = new Date().toISOString();
+            
             remindersToUpdate.push({
               reminder_id: client.reminder_id,
-              sent_at: new Date().toISOString(),
+              sent_at: sentAt,
               status: client.initialStatus,
               current_step: client.currentStep,
             });
+
+            // Créer ou récupérer la conversation pour ce client
+            try {
+              // Vérifier si une conversation existe déjà pour ce client
+              const { data: existingConv } = await supabase
+                .from('conversations')
+                .select('id')
+                .eq('client_id', client.client_id)
+                .single();
+
+              let conversationId: string;
+
+              if (existingConv) {
+                conversationId = existingConv.id;
+                // Mettre à jour la conversation existante
+                await supabase
+                  .from('conversations')
+                  .update({
+                    last_message: `[Relance automatique] Template: ${templateName || 'rappel_visite_technique_vf'}`,
+                    last_message_at: sentAt,
+                    status: 'open',
+                  })
+                  .eq('id', conversationId);
+              } else {
+                // Créer une nouvelle conversation
+                const { data: newConv, error: convError } = await supabase
+                  .from('conversations')
+                  .insert({
+                    client_id: client.client_id,
+                    client_phone: client.phone,
+                    client_name: clientData.name,
+                    last_message: `[Relance automatique] Template: ${templateName || 'rappel_visite_technique_vf'}`,
+                    last_message_at: sentAt,
+                    unread_count: 0,
+                    status: 'open',
+                  })
+                  .select('id')
+                  .single();
+
+                if (convError || !newConv) {
+                  console.error('❌ Erreur création conversation:', convError);
+                } else {
+                  conversationId = newConv.id;
+                }
+              }
+
+              // Créer le message outbound dans la conversation
+              if (conversationId!) {
+                const messageContent = `Madame, Monsieur,\n• Le ${datePrecedentVisite}, nous avons eu le plaisir de contrôler, dans notre centre ${nomCentre}, votre véhicule ${marque} ${modele}, immatriculé ${immat}.\n• La validité de ce contrôle technique arrivant bientôt à échéance, le prochain devra s'effectuer avant le : ${dateProchVis}.\n• N'hésitez pas à prendre rendez-vous en ligne ou par téléphone.`;
+                
+                await supabase
+                  .from('messages')
+                  .insert({
+                    conversation_id: conversationId,
+                    wa_message_id: whatsappResult.messageId || null,
+                    from_phone: '33767668396', // Numéro d'envoi WhatsApp Business
+                    to_phone: client.phone,
+                    direction: 'outbound',
+                    message_type: 'template',
+                    content: messageContent,
+                    template_name: templateName || 'rappel_visite_technique_vf',
+                    status: 'sent',
+                  });
+              }
+            } catch (convError) {
+              console.error('❌ Erreur création conversation/message:', convError);
+              // On ne fail pas l'envoi si la création de conversation échoue
+            }
           } else {
             failCount++;
             console.warn(`⚠️ Failed to send WhatsApp for client ${client.client_id}:`, whatsappResult.error);
