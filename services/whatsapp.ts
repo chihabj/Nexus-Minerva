@@ -229,29 +229,16 @@ export async function sendRappelVisiteTechnique({
   // Utiliser le template spécifique au centre, ou le template par défaut
   const finalTemplateName = templateName || 'rappel_visite_technique_vf';
   
-  // Pour les templates par centre, le nom du centre est fixe dans le template (5 variables)
-  // Pour le template générique, on a 7 variables incluant typeCentre et nomCentre
-  const hasStaticCenterName = templateName && templateName !== 'rappel_visite_technique_vf';
-  
-  const bodyParameters = hasStaticCenterName
-    ? [
-        // Templates par centre: 5 variables (centre fixe dans le texte)
-        { type: 'text', text: datePrecedentVisite || 'N/A' },  // {{1}} DatePrecedentVisite
-        { type: 'text', text: marque || 'N/A' },               // {{2}} Marque
-        { type: 'text', text: modele || 'N/A' },               // {{3}} Modele
-        { type: 'text', text: immat || 'N/A' },                // {{4}} Immat
-        { type: 'text', text: dateProchVis || 'N/A' },         // {{5}} DateProchVis
-      ]
-    : [
-        // Template générique: 7 variables
-        { type: 'text', text: datePrecedentVisite || 'N/A' },  // {{1}} DatePrecedentVisite
-        { type: 'text', text: marque || 'N/A' },               // {{2}} Marque
-        { type: 'text', text: modele || 'N/A' },               // {{3}} Modele
-        { type: 'text', text: immat || 'N/A' },                // {{4}} Immat
-        { type: 'text', text: dateProchVis || 'N/A' },         // {{5}} DateProchVis
-        { type: 'text', text: typeCentre || 'N/A' },           // {{6}} TypeCentre
-        { type: 'text', text: nomCentre || 'N/A' },            // {{7}} centre
-      ];
+  // Templates par centre: 6 variables
+  // {{1}} datePrecedentVisite, {{2}} marque, {{3}} modele, {{4}} immat, {{5}} dateProchVis, {{6}} nomCentre
+  const bodyParameters = [
+    { type: 'text', text: datePrecedentVisite || 'N/A' },  // {{1}} DatePrecedentVisite
+    { type: 'text', text: marque || 'N/A' },               // {{2}} Marque
+    { type: 'text', text: modele || 'N/A' },               // {{3}} Modele
+    { type: 'text', text: immat || 'N/A' },                // {{4}} Immat
+    { type: 'text', text: dateProchVis || 'N/A' },         // {{5}} DateProchVis
+    { type: 'text', text: nomCentre || 'N/A' },            // {{6}} NomCentre
+  ];
 
   const components: TemplateComponent[] = [
     {
