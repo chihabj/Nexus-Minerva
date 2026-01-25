@@ -513,11 +513,13 @@ export function useImportProcess() {
         }
       }
 
+      // Accumulate clients for reminder across all batches
+      const allClientsForReminder: ClientForReminder[] = [];
+      
       // Batch insert to Supabase
       if (clientsToInsert.length > 0) {
         // Insert in batches of 100
         const batchSize = 100;
-        const allClientsForReminder: ClientForReminder[] = []; // Accumulate across all batches
         
         for (let i = 0; i < clientsToInsert.length; i += batchSize) {
           const batch = clientsToInsert.slice(i, i + batchSize);
