@@ -334,6 +334,14 @@ export default function TodoList() {
                 </div>
               </div>
 
+              {/* WhatsApp Unavailable Warning */}
+              {reminder.client?.whatsapp_available === false && (
+                <div className="px-4 py-2 bg-red-50 border-b border-red-100 flex items-center gap-2">
+                  <span className="text-red-500">⚠️</span>
+                  <span className="text-sm font-medium text-red-700">WhatsApp indisponible pour ce numéro - Appel requis</span>
+                </div>
+              )}
+
               {/* Client Info */}
               <div className="p-4 bg-gray-50 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
@@ -383,17 +391,23 @@ export default function TodoList() {
                 <div className="flex-1" />
                 
                 {/* Quick Actions */}
-                <a
-                  href={`https://wa.me/${reminder.client?.phone?.replace(/[^0-9]/g, '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-lg bg-green-100 text-green-700 text-sm font-medium hover:bg-green-200 transition-colors"
-                >
-                  💬 WhatsApp
-                </a>
+                {reminder.client?.whatsapp_available !== false ? (
+                  <a
+                    href={`https://wa.me/${reminder.client?.phone?.replace(/[^0-9]/g, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-green-100 text-green-700 text-sm font-medium hover:bg-green-200 transition-colors"
+                  >
+                    💬 WhatsApp
+                  </a>
+                ) : (
+                  <span className="px-3 py-1.5 rounded-lg bg-gray-200 text-gray-400 text-sm font-medium cursor-not-allowed">
+                    💬 WhatsApp indisponible
+                  </span>
+                )}
                 <a
                   href={`tel:${reminder.client?.phone}`}
-                  className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200 transition-colors"
+                  className="px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 text-sm font-medium hover:bg-blue-200 transition-colors"
                 >
                   📞 Appeler
                 </a>

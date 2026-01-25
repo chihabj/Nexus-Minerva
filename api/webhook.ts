@@ -417,15 +417,17 @@ async function updateMessageStatus(
         .single();
 
       if (reminder) {
+        // Passer à "To_be_called" pour que ça apparaisse dans la Todo List
         await supabase
           .from('reminders')
           .update({ 
-            status: 'Failed',
-            message: `WhatsApp non délivré: ${errorText}`
+            status: 'To_be_called',
+            call_required: true,
+            message: `WhatsApp non délivré: ${errorText} - Appel requis`
           })
           .eq('id', reminder.id);
 
-        console.log(`⚠️ Reminder ${reminder.id} marked as Failed`);
+        console.log(`⚠️ Reminder ${reminder.id} marked as To_be_called (WhatsApp failed)`);
       }
 
       // Ajouter une note système
