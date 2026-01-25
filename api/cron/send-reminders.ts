@@ -70,6 +70,9 @@ interface ReminderWithClient {
     name: string | null;
     vehicle: string | null;
     vehicle_year: number | null;
+    marque: string | null;
+    modele: string | null;
+    immatriculation: string | null;
     last_visit: string | null;
     center_name: string | null;
     center_id: string | null;
@@ -273,7 +276,7 @@ async function processWorkflowStep(
       due_date,
       status,
       created_at,
-      client:clients(id, phone, name, vehicle, vehicle_year, last_visit, center_name, center_id)
+      client:clients(id, phone, name, vehicle, vehicle_year, marque, modele, immatriculation, last_visit, center_name, center_id)
     `)
     .in('status', step.sourceStatuses)
     .lt('created_at', tenMinutesAgo); // Only process reminders older than 10 minutes
@@ -335,8 +338,10 @@ async function processWorkflowStep(
 
       // Préparer les variables du template
       const datePrecedentVisite = formatDateForMessage(clientData.last_visit);
-      const { marque, modele } = parseVehicle(clientData.vehicle);
-      const immat = ''; // TODO: Ajouter le champ immatriculation si nécessaire
+      // Utiliser les champs séparés ou fallback sur parseVehicle
+      const marque = clientData.marque || parseVehicle(clientData.vehicle).marque;
+      const modele = clientData.modele || parseVehicle(clientData.vehicle).modele;
+      const immat = clientData.immatriculation || '';
       const dateProchVis = formatDateForMessage(reminder.due_date);
 
       // Send WhatsApp message avec le template du centre

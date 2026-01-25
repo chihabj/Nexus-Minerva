@@ -38,6 +38,10 @@ export interface Client {
   phone: string | null;
   vehicle: string | null;
   vehicle_year: number | null;
+  marque: string | null;          // Marque du véhicule (ex: Peugeot, Renault)
+  modele: string | null;          // Modèle du véhicule (ex: 308, Clio)
+  immatriculation: string | null; // Plaque d'immatriculation (ex: AB-123-CD)
+  vin: string | null;             // Numéro de châssis / Vehicle Identification Number
   last_visit: string | null;
   status: ReminderStatus;
   region: string | null;

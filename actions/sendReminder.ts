@@ -95,6 +95,9 @@ export async function sendReminderAction(
           phone,
           vehicle,
           vehicle_year,
+          marque,
+          modele,
+          immatriculation,
           last_visit,
           center_name,
           center_id
@@ -143,8 +146,10 @@ export async function sendReminderAction(
 
     // 3. Préparer les variables du template
     const datePrecedentVisite = formatDateForMessage(client.last_visit);
-    const { marque, modele } = parseVehicle(client.vehicle);
-    const immat = ''; // TODO: Ajouter le champ immatriculation dans la table clients si nécessaire
+    // Utiliser les champs séparés ou fallback sur parseVehicle
+    const marque = client.marque || parseVehicle(client.vehicle).marque;
+    const modele = client.modele || parseVehicle(client.vehicle).modele;
+    const immat = client.immatriculation || '';
     const dateProchVis = reminder.due_date 
       ? formatDateForMessage(reminder.due_date)
       : (() => {

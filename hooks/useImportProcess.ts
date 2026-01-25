@@ -117,8 +117,12 @@ export const DB_FIELDS: MappingField[] = [
   { dbField: 'name', label: 'Full Name', required: false, confidence: 'None' },
   { dbField: 'email', label: 'Email Address', required: false, confidence: 'None' },
   { dbField: 'phone', label: 'Phone Number', required: true, confidence: 'None' },
-  { dbField: 'vehicle', label: 'Vehicle Model', required: false, confidence: 'None' },
+  { dbField: 'marque', label: 'Marque', required: false, confidence: 'None' },
+  { dbField: 'modele', label: 'Modèle', required: false, confidence: 'None' },
+  { dbField: 'vehicle', label: 'Véhicule (Marque + Modèle)', required: false, confidence: 'None' },
   { dbField: 'vehicle_year', label: 'Vehicle Year', required: false, confidence: 'None' },
+  { dbField: 'immatriculation', label: 'Immatriculation', required: false, confidence: 'None' },
+  { dbField: 'vin', label: 'VIN (Châssis)', required: false, confidence: 'None' },
   { dbField: 'last_visit', label: 'Last Visit Date', required: true, confidence: 'None' },
   { dbField: 'region', label: 'Region', required: false, confidence: 'None' },
   { dbField: 'center_name', label: 'Centre de visite', required: true, confidence: 'None' },
@@ -439,6 +443,12 @@ export function useImportProcess() {
                     client.last_visit = normalizedDate;
                   }
                   break;
+                case 'marque':
+                  client.marque = normalizeText(strValue);
+                  break;
+                case 'modele':
+                  client.modele = normalizeText(strValue);
+                  break;
                 case 'vehicle':
                   client.vehicle = normalizeText(strValue);
                   break;
@@ -447,6 +457,14 @@ export function useImportProcess() {
                   if (!isNaN(year) && year >= 1900 && year <= new Date().getFullYear() + 1) {
                     client.vehicle_year = year;
                   }
+                  break;
+                case 'immatriculation':
+                  // Normaliser l'immatriculation (majuscules, format standard)
+                  client.immatriculation = strValue.toUpperCase().replace(/\s+/g, '-').trim();
+                  break;
+                case 'vin':
+                  // VIN en majuscules (17 caractères standard)
+                  client.vin = strValue.toUpperCase().replace(/\s+/g, '').trim();
                   break;
                 case 'region':
                   client.region = normalizeText(strValue);
@@ -706,7 +724,7 @@ export function useImportProcess() {
           // Récupérer les informations complètes du client depuis la base de données
           const { data: clientData, error: clientError } = await supabase
             .from('clients')
-            .select('id, name, phone, vehicle, vehicle_year, last_visit, center_name, center_id')
+            .select('id, name, phone, vehicle, vehicle_year, marque, modele, immatriculation, last_visit, center_name, center_id')
             .eq('id', client.client_id)
             .single();
 
@@ -740,8 +758,10 @@ export function useImportProcess() {
 
           // Préparer les variables du template
           const datePrecedentVisite = formatDateForMessage(clientData.last_visit);
-          const { marque, modele } = parseVehicle(clientData.vehicle);
-          const immat = ''; // TODO: Ajouter le champ immatriculation dans la table clients si nécessaire
+          // Utiliser les champs séparés ou fallback sur parseVehicle
+          const marque = clientData.marque || parseVehicle(clientData.vehicle).marque;
+          const modele = clientData.modele || parseVehicle(clientData.vehicle).modele;
+          const immat = clientData.immatriculation || '';
           const dateProchVis = formatDateForMessage(client.due_date);
           
           // Send WhatsApp message avec le template du centre
@@ -913,9 +933,13 @@ function getFieldKeywords(dbField: string): string[] {
     name: ['name', 'nom', 'full name', 'client', 'customer', 'prénom', 'firstname', 'lastname'],
     email: ['email', 'mail', 'e-mail', 'courriel', 'address'],
     phone: ['phone', 'mobile', 'tel', 'telephone', 'téléphone', 'cell', 'number', 'numéro', 'gsm'],
-    vehicle: ['vehicle', 'car', 'voiture', 'model', 'modèle', 'marque', 'brand', 'auto'],
-    vehicle_year: ['year', 'année', 'annee', 'model year'],
-    last_visit: ['visit', 'date', 'last', 'dernier', 'visite', 'appointment', 'rdv', 'passage'],
+    marque: ['marque', 'brand', 'make', 'constructeur', 'fabricant'],
+    modele: ['modele', 'modèle', 'model', 'type', 'version'],
+    vehicle: ['vehicle', 'car', 'voiture', 'véhicule', 'auto'],
+    vehicle_year: ['year', 'année', 'annee', 'model year', 'mise en circulation'],
+    immatriculation: ['immat', 'immatriculation', 'plaque', 'plate', 'license', 'registration', 'reg'],
+    vin: ['vin', 'chassis', 'châssis', 'serie', 'série', 'vehicle identification', 'numéro série'],
+    last_visit: ['visit', 'date', 'last', 'dernier', 'visite', 'appointment', 'rdv', 'passage', 'controle', 'contrôle'],
     region: ['region', 'région', 'area', 'zone', 'sector', 'location', 'city', 'ville'],
     center_name: ['center', 'centre', 'visite', 'agence', 'point', 'garage', 'atelier', 'site', 'location'],
   };
