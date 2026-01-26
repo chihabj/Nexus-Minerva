@@ -200,14 +200,14 @@ export default function TodoList() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center h-full">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="h-full flex flex-col overflow-hidden">
       {/* Toast Notification */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg ${
@@ -217,109 +217,113 @@ export default function TodoList() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Todo List</h1>
-          <p className="text-gray-500 mt-1">Tâches nécessitant votre intervention</p>
+      {/* Header - Fixed */}
+      <div className="flex-shrink-0 px-6 pt-6 pb-4">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Todo List</h1>
+            <p className="text-gray-500 mt-1">Tâches nécessitant votre intervention</p>
+          </div>
+          <button
+            onClick={fetchReminders}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Actualiser
+          </button>
         </div>
-        <button
-          onClick={fetchReminders}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Actualiser
-        </button>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <button
+            onClick={() => setActiveTab('all')}
+            className={`p-3 rounded-xl border-2 transition-all ${
+              activeTab === 'all' 
+                ? 'border-indigo-500 bg-indigo-50' 
+                : 'border-gray-200 bg-white hover:border-gray-300'
+            }`}
+          >
+            <div className="text-2xl font-bold text-gray-900">{counts.all}</div>
+            <div className="text-xs text-gray-500">Total des tâches</div>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('Pending')}
+            className={`p-3 rounded-xl border-2 transition-all ${
+              activeTab === 'Pending' 
+                ? 'border-yellow-500 bg-yellow-50' 
+                : 'border-gray-200 bg-white hover:border-gray-300'
+            }`}
+          >
+            <div className="text-2xl font-bold text-yellow-600">{counts.Pending}</div>
+            <div className="text-xs text-gray-500">⏳ En attente</div>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('Onhold')}
+            className={`p-3 rounded-xl border-2 transition-all ${
+              activeTab === 'Onhold' 
+                ? 'border-orange-500 bg-orange-50' 
+                : 'border-gray-200 bg-white hover:border-gray-300'
+            }`}
+          >
+            <div className="text-2xl font-bold text-orange-600">{counts.Onhold}</div>
+            <div className="text-xs text-gray-500">⏸️ À traiter</div>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('To_be_called')}
+            className={`p-3 rounded-xl border-2 transition-all ${
+              activeTab === 'To_be_called' 
+                ? 'border-red-500 bg-red-50' 
+                : 'border-gray-200 bg-white hover:border-gray-300'
+            }`}
+          >
+            <div className="text-2xl font-bold text-red-600">{counts.To_be_called}</div>
+            <div className="text-xs text-gray-500">📞 À appeler</div>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('To_be_contacted')}
+            className={`p-3 rounded-xl border-2 transition-all ${
+              activeTab === 'To_be_contacted' 
+                ? 'border-blue-500 bg-blue-50' 
+                : 'border-gray-200 bg-white hover:border-gray-300'
+            }`}
+          >
+            <div className="text-2xl font-bold text-blue-600">{counts.To_be_contacted}</div>
+            <div className="text-xs text-gray-500">🔔 À recontacter</div>
+          </button>
+        </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <button
-          onClick={() => setActiveTab('all')}
-          className={`p-4 rounded-xl border-2 transition-all ${
-            activeTab === 'all' 
-              ? 'border-indigo-500 bg-indigo-50' 
-              : 'border-gray-200 bg-white hover:border-gray-300'
-          }`}
-        >
-          <div className="text-3xl font-bold text-gray-900">{counts.all}</div>
-          <div className="text-sm text-gray-500">Total des tâches</div>
-        </button>
-        
-        <button
-          onClick={() => setActiveTab('Pending')}
-          className={`p-4 rounded-xl border-2 transition-all ${
-            activeTab === 'Pending' 
-              ? 'border-yellow-500 bg-yellow-50' 
-              : 'border-gray-200 bg-white hover:border-gray-300'
-          }`}
-        >
-          <div className="text-3xl font-bold text-yellow-600">{counts.Pending}</div>
-          <div className="text-sm text-gray-500">⏳ En attente</div>
-        </button>
-        
-        <button
-          onClick={() => setActiveTab('Onhold')}
-          className={`p-4 rounded-xl border-2 transition-all ${
-            activeTab === 'Onhold' 
-              ? 'border-orange-500 bg-orange-50' 
-              : 'border-gray-200 bg-white hover:border-gray-300'
-          }`}
-        >
-          <div className="text-3xl font-bold text-orange-600">{counts.Onhold}</div>
-          <div className="text-sm text-gray-500">⏸️ À traiter</div>
-        </button>
-        
-        <button
-          onClick={() => setActiveTab('To_be_called')}
-          className={`p-4 rounded-xl border-2 transition-all ${
-            activeTab === 'To_be_called' 
-              ? 'border-red-500 bg-red-50' 
-              : 'border-gray-200 bg-white hover:border-gray-300'
-          }`}
-        >
-          <div className="text-3xl font-bold text-red-600">{counts.To_be_called}</div>
-          <div className="text-sm text-gray-500">📞 À appeler</div>
-        </button>
-        
-        <button
-          onClick={() => setActiveTab('To_be_contacted')}
-          className={`p-4 rounded-xl border-2 transition-all ${
-            activeTab === 'To_be_contacted' 
-              ? 'border-blue-500 bg-blue-50' 
-              : 'border-gray-200 bg-white hover:border-gray-300'
-          }`}
-        >
-          <div className="text-3xl font-bold text-blue-600">{counts.To_be_contacted}</div>
-          <div className="text-sm text-gray-500">🔔 À recontacter</div>
-        </button>
-      </div>
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-y-auto px-6 pb-6">
+        {/* Error */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-4">
+            {error}
+          </div>
+        )}
 
-      {/* Error */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
-          {error}
-        </div>
-      )}
+        {/* Empty State */}
+        {filteredReminders.length === 0 && !error && (
+          <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
+            <div className="text-6xl mb-4">✅</div>
+            <h3 className="text-lg font-medium text-gray-900">Aucune tâche en attente</h3>
+            <p className="text-gray-500 mt-1">
+              {activeTab === 'all' 
+                ? 'Toutes les tâches ont été traitées !' 
+                : `Aucune tâche dans la catégorie "${STATUS_CONFIG[activeTab]?.label || activeTab}"`}
+            </p>
+          </div>
+        )}
 
-      {/* Empty State */}
-      {filteredReminders.length === 0 && !error && (
-        <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
-          <div className="text-6xl mb-4">✅</div>
-          <h3 className="text-lg font-medium text-gray-900">Aucune tâche en attente</h3>
-          <p className="text-gray-500 mt-1">
-            {activeTab === 'all' 
-              ? 'Toutes les tâches ont été traitées !' 
-              : `Aucune tâche dans la catégorie "${STATUS_CONFIG[activeTab]?.label || activeTab}"`}
-          </p>
-        </div>
-      )}
-
-      {/* Tasks List */}
-      <div className="space-y-4">
-        {filteredReminders.map(reminder => {
+        {/* Tasks List */}
+        <div className="space-y-4">
+          {filteredReminders.map(reminder => {
           const config = STATUS_CONFIG[reminder.status];
           const daysUntil = getDaysUntilDue(reminder.due_date);
           const isUrgent = daysUntil <= 3;
@@ -332,25 +336,25 @@ export default function TodoList() {
             >
               {/* Card Header */}
               <div className="p-4 border-b border-gray-100">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{config?.icon}</span>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-gray-900">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <span className="text-2xl flex-shrink-0">{config?.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold text-gray-900 truncate">
                           {reminder.client?.name || reminder.client?.phone || 'Client'}
                         </h3>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${config?.color} ${config?.bgColor}`}>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${config?.color} ${config?.bgColor}`}>
                           {config?.label}
                         </span>
                       </div>
-                      <p className="text-sm text-gray-500">{config?.description}</p>
+                      <p className="text-sm text-gray-500 line-clamp-1">{config?.description}</p>
                     </div>
                   </div>
                   
                   {/* Due Date Badge */}
-                  <div className={`text-right ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : 'text-gray-600'}`}>
-                    <div className="text-sm font-medium">
+                  <div className={`flex-shrink-0 text-right ${isOverdue ? 'text-red-600' : isUrgent ? 'text-amber-600' : 'text-gray-600'}`}>
+                    <div className="text-xs font-medium">
                       {isOverdue ? 'EN RETARD' : isUrgent ? 'URGENT' : 'Échéance'}
                     </div>
                     <div className="text-lg font-bold">
@@ -364,30 +368,29 @@ export default function TodoList() {
               {/* WhatsApp Unavailable Warning */}
               {reminder.client?.whatsapp_available === false && (
                 <div className="px-4 py-2 bg-red-50 border-b border-red-100 flex items-center gap-2">
-                  <span className="text-red-500">⚠️</span>
+                  <span className="text-red-500 flex-shrink-0">⚠️</span>
                   <span className="text-sm font-medium text-red-700">WhatsApp indisponible pour ce numéro - Appel requis</span>
                 </div>
               )}
 
-              {/* Client Info */}
-              <div className="p-4 bg-gray-50 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <div className="text-gray-500">Téléphone</div>
-                  <div className="font-medium">{reminder.client?.phone || '-'}</div>
+              {/* Client Info - More compact and responsive */}
+              <div className="p-3 bg-gray-50 grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                <div className="min-w-0">
+                  <div className="text-gray-500 text-xs">Téléphone</div>
+                  <div className="font-medium truncate">{reminder.client?.phone || '-'}</div>
                 </div>
-                <div>
-                  <div className="text-gray-500">Véhicule</div>
-                  <div className="font-medium">
-                    {reminder.client?.vehicle || '-'}
-                    {reminder.client?.vehicle_year && ` (${reminder.client.vehicle_year})`}
+                <div className="min-w-0">
+                  <div className="text-gray-500 text-xs">Matricule</div>
+                  <div className="font-medium truncate font-mono">
+                    {reminder.client?.immatriculation || '-'}
                   </div>
                 </div>
-                <div>
-                  <div className="text-gray-500">Centre</div>
-                  <div className="font-medium">{reminder.client?.center_name || '-'}</div>
+                <div className="min-w-0">
+                  <div className="text-gray-500 text-xs">Centre</div>
+                  <div className="font-medium truncate">{reminder.client?.center_name || '-'}</div>
                 </div>
-                <div>
-                  <div className="text-gray-500">Dernière visite</div>
+                <div className="min-w-0">
+                  <div className="text-gray-500 text-xs">Dernière visite</div>
                   <div className="font-medium">{formatDate(reminder.client?.last_visit || null)}</div>
                 </div>
               </div>
@@ -402,46 +405,49 @@ export default function TodoList() {
                 </div>
               )}
 
-              {/* Actions */}
-              <div className="p-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
-                {config?.actions.map(action => (
-                  <button
-                    key={action.status}
-                    onClick={() => updateStatus(reminder.id, action.status)}
-                    disabled={updatingId === reminder.id}
-                    className={`px-3 py-1.5 rounded-lg text-white text-sm font-medium transition-colors ${action.color} disabled:opacity-50`}
-                  >
-                    {updatingId === reminder.id ? '...' : action.label}
-                  </button>
-                ))}
+              {/* Actions - Responsive layout */}
+              <div className="p-3 border-t border-gray-100">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  {config?.actions.map(action => (
+                    <button
+                      key={action.status}
+                      onClick={() => updateStatus(reminder.id, action.status)}
+                      disabled={updatingId === reminder.id}
+                      className={`px-3 py-1.5 rounded-lg text-white text-xs font-medium transition-colors ${action.color} disabled:opacity-50`}
+                    >
+                      {updatingId === reminder.id ? '...' : action.label}
+                    </button>
+                  ))}
+                </div>
                 
-                <div className="flex-1" />
-                
-                {/* Quick Actions */}
-                {reminder.client?.whatsapp_available !== false && reminder.client?.phone ? (
-                  <button
-                    onClick={() => navigate(`/inbox?phone=${encodeURIComponent(reminder.client?.phone || '')}`)}
-                    className="px-3 py-1.5 rounded-lg bg-green-100 text-green-700 text-sm font-medium hover:bg-green-200 transition-colors"
+                {/* Quick Actions - Aligned right */}
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {reminder.client?.whatsapp_available !== false && reminder.client?.phone ? (
+                    <button
+                      onClick={() => navigate(`/inbox?phone=${encodeURIComponent(reminder.client?.phone || '')}`)}
+                      className="px-3 py-1.5 rounded-lg bg-green-100 text-green-700 text-xs font-medium hover:bg-green-200 transition-colors"
+                    >
+                      💬 WhatsApp
+                    </button>
+                  ) : null}
+                  <a
+                    href={`tel:${reminder.client?.phone}`}
+                    className="px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 text-xs font-medium hover:bg-blue-200 transition-colors"
                   >
-                    💬 WhatsApp
-                  </button>
-                ) : null}
-                <a
-                  href={`tel:${reminder.client?.phone}`}
-                  className="px-3 py-1.5 rounded-lg bg-blue-100 text-blue-700 text-sm font-medium hover:bg-blue-200 transition-colors"
-                >
-                  📞 Appeler
-                </a>
-                <Link
-                  to={`/clients/${reminder.client_id}`}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-100 text-indigo-700 text-sm font-medium hover:bg-indigo-200 transition-colors"
-                >
-                  Voir détails →
-                </Link>
+                    📞 Appeler
+                  </a>
+                  <Link
+                    to={`/clients/${reminder.client_id}`}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-100 text-indigo-700 text-xs font-medium hover:bg-indigo-200 transition-colors"
+                  >
+                    Voir détails →
+                  </Link>
+                </div>
               </div>
             </div>
           );
         })}
+        </div>
       </div>
     </div>
   );
