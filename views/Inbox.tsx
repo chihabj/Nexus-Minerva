@@ -859,11 +859,31 @@ export default function Inbox() {
               messages.map((m) => (
                 <div 
                   key={m.id} 
-                  className={`flex flex-col ${m.direction === 'outbound' ? 'items-end' : 'items-start'}`}
+                  className={`flex flex-col ${
+                    m.message_type === 'button' || m.message_type === 'interactive' 
+                      ? 'items-center' 
+                      : m.direction === 'outbound' ? 'items-end' : 'items-start'
+                  }`}
                 >
                   {m.message_type === 'system' ? (
                     <div className="bg-amber-100 border border-amber-200 text-amber-800 text-[11px] px-4 py-1.5 rounded-full font-medium shadow-sm">
                       {m.content}
+                    </div>
+                  ) : (m.message_type === 'button' || m.message_type === 'interactive') ? (
+                    // Button click notification - centered and distinct
+                    <div className="my-2">
+                      <div className="bg-green-100 border-2 border-green-300 rounded-xl px-5 py-3 shadow-sm">
+                        <div className="flex items-center gap-2 text-green-700">
+                          <span className="text-lg">✅</span>
+                          <div>
+                            <p className="font-semibold text-sm">Le client a cliqué sur :</p>
+                            <p className="font-bold text-green-800">"{m.content}"</p>
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-green-600 mt-1 text-center">
+                          {formatTime(m.created_at)}
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <>
