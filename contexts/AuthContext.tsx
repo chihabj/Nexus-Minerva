@@ -236,6 +236,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           full_name: fullName,
           role: role,
         },
+        emailRedirectTo: window.location.origin, // Redirect to current domain (works for dev & prod)
       },
     });
 

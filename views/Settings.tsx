@@ -98,6 +98,7 @@ export default function Settings() {
               full_name: newUser.full_name,
               role: newUser.role,
             },
+            emailRedirectTo: window.location.origin,
           },
         });
 
