@@ -183,8 +183,9 @@ function isAppointmentConfirmation(content: string): boolean {
 /**
  * Find client and update reminder status when client responds
  * ANY response puts the reminder on hold for agent review
+ * If no client exists, create one with a To_be_contacted reminder
  */
-async function handleClientResponse(phone: string, content: string, clientId: string | null) {
+async function handleClientResponse(phone: string, content: string, clientId: string | null, contactName?: string) {
   const cleanPhone = phone.startsWith('+') ? phone.substring(1) : phone;
   
   // Find client by phone if not already known
@@ -199,8 +200,61 @@ async function handleClientResponse(phone: string, content: string, clientId: st
     actualClientId = client?.id || null;
   }
   
+  // If no client exists, create one and a reminder for TodoList
   if (!actualClientId) {
-    console.log('⚠️ No client found for phone:', cleanPhone);
+    console.log('📝 Creating new client for unknown number:', cleanPhone);
+    
+    // Create a new client
+    const { data: newClient, error: clientError } = await supabase
+      .from('clients')
+      .insert({
+        phone: cleanPhone,
+        name: contactName || cleanPhone,
+        status: 'New',
+      })
+      .select('id')
+      .single();
+    
+    if (clientError || !newClient) {
+      console.error('❌ Error creating client:', clientError);
+      return;
+    }
+    
+    actualClientId = newClient.id;
+    console.log('✅ New client created:', actualClientId);
+    
+    // Create a reminder with To_be_contacted status for TodoList
+    const { error: reminderError } = await supabase
+      .from('reminders')
+      .insert({
+        client_id: actualClientId,
+        status: 'To_be_contacted',
+        due_date: new Date().toISOString().split('T')[0], // Today
+        reminder_date: new Date().toISOString().split('T')[0],
+        message: `Message entrant: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`,
+        current_step: 0,
+      });
+    
+    if (reminderError) {
+      console.error('❌ Error creating reminder:', reminderError);
+    } else {
+      console.log('✅ Reminder created for TodoList (To_be_contacted)');
+    }
+    
+    // Update the conversation with the client_id
+    await supabase
+      .from('conversations')
+      .update({ client_id: actualClientId, client_name: contactName || cleanPhone })
+      .eq('client_phone', cleanPhone);
+    
+    // Notify admins
+    await createNotificationForAdmins(
+      '🆕 Nouveau contact WhatsApp',
+      `Message de ${contactName || cleanPhone}: "${content.substring(0, 80)}${content.length > 80 ? '...' : ''}" - À traiter dans la TodoList`,
+      'action_required',
+      `/clients/${actualClientId}`
+    );
+    
     return;
   }
   
@@ -351,9 +405,9 @@ async function saveIncomingMessage(
     })
     .eq('id', conversationId);
   
-  // Process the response for appointment detection
+  // Process the response for appointment detection / create task for unknown numbers
   if (messageContent) {
-    await handleClientResponse(message.from, messageContent, clientId || null);
+    await handleClientResponse(message.from, messageContent, clientId || null, contactName);
   }
   
   // Create notification for all admins
