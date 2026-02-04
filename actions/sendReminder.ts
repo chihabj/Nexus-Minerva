@@ -272,9 +272,10 @@ export async function sendReminderAction(
 
       // Créer le message outbound dans la conversation
       if (conversationId!) {
-        const messageContent = `Madame, Monsieur,\n• Le ${datePrecedentVisite}, nous avons eu le plaisir de contrôler, dans notre centre ${nomCentre}, votre véhicule ${marque} ${modele}, immatriculé ${immat}.\n• La validité de ce contrôle technique arrivant bientôt à échéance, le prochain devra s'effectuer avant le : ${dateProchVis}.\n• N'hésitez pas à prendre rendez-vous en ligne ou par téléphone.`;
+        // Construire le contenu du message avec les variables disponibles
+        const messageContent = `Madame, Monsieur,\n\nNous avons eu le plaisir de contrôler votre véhicule dans notre centre ${centreComplet}.\n\nLa validité de ce contrôle technique arrivant bientôt à échéance, le prochain devra s'effectuer avant le : ${dateProchVis}.\n\nNous vous invitons à prendre rendez-vous en ligne ou par téléphone.`;
         
-        await supabase
+        const { error: msgError } = await supabase
           .from('messages')
           .insert({
             conversation_id: conversationId,
@@ -287,6 +288,12 @@ export async function sendReminderAction(
             template_name: templateName || 'rappel_visite_technique_vf',
             status: 'sent',
           });
+        
+        if (msgError) {
+          console.error('❌ Erreur insertion message:', msgError);
+        } else {
+          console.log('✅ Message inséré pour conversation:', conversationId);
+        }
       }
     } catch (convError) {
       console.error('❌ Erreur création conversation/message:', convError);
