@@ -915,16 +915,20 @@ export function useImportProcess() {
   }, [state.clientsForReminder]);
 
   const skipReminders = useCallback(async (clientIds: string[]) => {
-    // Update reminders to set their status based on daysUntilDue
+    // Update reminders to set their status to 'Pending' so they appear in the TodoList
+    // unless daysUntilDue <= 3, then set to 'To_be_called'
     const clientsToSkip = state.clientsForReminder.filter(c => clientIds.includes(c.client_id));
 
     for (const client of clientsToSkip) {
-      let finalStatus: 'New' | 'To_be_called' = 'New';
+      let finalStatus: 'Pending' | 'To_be_called' = 'Pending';
       let finalStep = 0;
+      
       if (client.daysUntilDue <= 3) {
+        // Urgent: needs call immediately
         finalStatus = 'To_be_called';
         finalStep = 4;
       }
+      // Otherwise: keep as 'Pending' so agents can send manually from TodoList
       
       await supabase
         .from('reminders')

@@ -474,19 +474,25 @@ export default function ImportData() {
     // Standard complete screen
     return (
       <div className="flex-1 flex items-center justify-center p-8">
-        <div className="bg-white dark:bg-surface-dark rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-12 text-center max-w-md">
+        <div className="bg-white dark:bg-surface-dark rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-12 text-center max-w-lg">
           {importResult?.success ? (
             <>
               <span className="material-symbols-outlined text-green-500 text-6xl">celebration</span>
-              <h3 className="text-2xl font-bold mt-4">Import Complete!</h3>
-              <p className="text-slate-500 mt-2">{importResult.inserted} records imported successfully.</p>
+              <h3 className="text-2xl font-bold mt-4">Import terminé !</h3>
+              <p className="text-slate-500 mt-2">{importResult.inserted} clients importés avec succès.</p>
+              <div className="mt-4 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                <p className="text-sm text-amber-700 dark:text-amber-400 flex items-center justify-center gap-2">
+                  <span className="material-symbols-outlined text-[18px]">info</span>
+                  Les relances non envoyées sont disponibles dans la <strong>To-do List</strong>
+                </p>
+              </div>
             </>
           ) : (
             <>
               <span className="material-symbols-outlined text-red-500 text-6xl">error</span>
-              <h3 className="text-2xl font-bold mt-4">Import Failed</h3>
+              <h3 className="text-2xl font-bold mt-4">Échec de l'import</h3>
               <p className="text-slate-500 mt-2">
-                {importResult?.inserted || 0} imported, {importResult?.failed || 0} failed.
+                {importResult?.inserted || 0} importés, {importResult?.failed || 0} échoués.
               </p>
               {importResult?.errors && importResult.errors.length > 0 && (
                 <div className="mt-4 text-left bg-red-50 rounded-lg p-4 max-h-32 overflow-auto">
@@ -501,7 +507,7 @@ export default function ImportData() {
             onClick={reset}
             className="mt-6 px-6 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg text-sm font-bold"
           >
-            Start New Import
+            Nouvel Import
           </button>
         </div>
       </div>
