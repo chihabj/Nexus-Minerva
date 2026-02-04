@@ -3,11 +3,11 @@
  * 
  * Scheduled at 10:30 AM daily (Paris time)
  * 
- * WORKFLOW:
- * - J-30: New → Reminder1_sent (send WhatsApp)
- * - J-15: Reminder1_sent/Pending → Reminder2_sent (send WhatsApp)
- * - J-7: Reminder2_sent/Pending → Reminder3_sent (send WhatsApp)
- * - J-3: Reminder3_sent/Pending → To_be_called (no message, agent must call)
+ * WORKFLOW (configurable via Settings > Workflow):
+ * - Step 1: New → Reminder1_sent (send WhatsApp)
+ * - Step 2: Reminder1_sent/Pending → Reminder2_sent (send WhatsApp)
+ * - Step 3: Reminder2_sent/Pending → Reminder3_sent (send WhatsApp)
+ * - Step 4: Reminder3_sent/Pending → To_be_called (call required)
  * 
  * Note: Onhold status is NOT processed (client has responded, waiting for agent)
  */
@@ -22,8 +22,18 @@ const WHATSAPP_PHONE_ID = process.env.VITE_WHATSAPP_PHONE_ID || '';
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-// Workflow configuration
-const WORKFLOW_STEPS = [
+// Workflow step interface for database records
+interface WorkflowStep {
+  name: string;
+  daysBeforeDue: number;
+  sourceStatuses: string[];
+  targetStatus: string;
+  action: string;
+  lastReminderSent: string | null;
+}
+
+// Default workflow configuration (fallback if database is empty)
+const DEFAULT_WORKFLOW_STEPS: WorkflowStep[] = [
   {
     name: 'J-30',
     daysBeforeDue: 30,
@@ -54,9 +64,79 @@ const WORKFLOW_STEPS = [
     sourceStatuses: ['Reminder3_sent', 'Pending'],
     targetStatus: 'To_be_called',
     action: 'mark_call',
-    lastReminderSent: null, // No message sent
+    lastReminderSent: null,
   },
 ];
+
+/**
+ * Load workflow steps from database (reminder_steps table)
+ * Falls back to default configuration if database is empty
+ */
+async function loadWorkflowSteps(): Promise<WorkflowStep[]> {
+  const { data: dbSteps, error } = await supabase
+    .from('reminder_steps')
+    .select('*')
+    .eq('is_active', true)
+    .order('step_order', { ascending: true });
+
+  if (error || !dbSteps || dbSteps.length === 0) {
+    console.log('⚠️ Using default workflow steps (database empty or error)');
+    return DEFAULT_WORKFLOW_STEPS;
+  }
+
+  console.log(`📋 Loaded ${dbSteps.length} workflow steps from database`);
+
+  // Map database records to workflow step structure
+  return dbSteps.map((step, index) => {
+    const stepOrder = step.step_order || (index + 1);
+    
+    // Determine source and target statuses based on step order
+    let sourceStatuses: string[];
+    let targetStatus: string;
+    let lastReminderSent: string | null;
+    
+    switch (stepOrder) {
+      case 1:
+        sourceStatuses = ['New'];
+        targetStatus = 'Reminder1_sent';
+        lastReminderSent = `J${step.days_before_due}`;
+        break;
+      case 2:
+        sourceStatuses = ['Reminder1_sent', 'Pending'];
+        targetStatus = 'Reminder2_sent';
+        lastReminderSent = `J${step.days_before_due}`;
+        break;
+      case 3:
+        sourceStatuses = ['Reminder2_sent', 'Pending'];
+        targetStatus = 'Reminder3_sent';
+        lastReminderSent = `J${step.days_before_due}`;
+        break;
+      case 4:
+      default:
+        sourceStatuses = ['Reminder3_sent', 'Pending'];
+        targetStatus = 'To_be_called';
+        lastReminderSent = null;
+        break;
+    }
+
+    // Map action_type from database to cron action
+    let action = 'whatsapp';
+    if (step.action_type === 'call') {
+      action = 'mark_call';
+    } else if (step.action_type === 'email') {
+      action = 'email'; // Not implemented yet
+    }
+
+    return {
+      name: `J-${step.days_before_due}`,
+      daysBeforeDue: step.days_before_due,
+      sourceStatuses,
+      targetStatus,
+      action,
+      lastReminderSent,
+    };
+  });
+}
 
 interface ReminderWithClient {
   id: string;
@@ -250,7 +330,7 @@ function formatDate(dateStr: string): string {
  * Process reminders for a specific workflow step
  */
 async function processWorkflowStep(
-  step: typeof WORKFLOW_STEPS[0],
+  step: WorkflowStep,
   results: { whatsapp_sent: number; whatsapp_failed: number; calls_required: number }
 ) {
   console.log(`\n📋 Processing ${step.name} (${step.action})...`);
@@ -428,8 +508,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       calls_required: 0,
     };
 
+    // Load workflow steps from database (configurable via Settings)
+    const workflowSteps = await loadWorkflowSteps();
+    
     // Process each workflow step in order
-    for (const step of WORKFLOW_STEPS) {
+    for (const step of workflowSteps) {
       await processWorkflowStep(step, results);
     }
 
