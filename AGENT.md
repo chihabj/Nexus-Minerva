@@ -310,6 +310,26 @@ const supabase = createClient(
 
 ---
 
+## 📋 TODO / Roadmap
+
+### Priorité Haute
+- [ ] **Réinitialisation mot de passe** : Page "Mot de passe oublié" + email reset
+- [ ] **Changement mot de passe** : Section dans Settings pour utilisateur connecté
+- [ ] **Page reset-password** : Traiter le lien de réinitialisation Supabase
+- [ ] **UTM Tracking** : Ajouter tracking des clics boutons URL via raccourcisseur
+
+### Priorité Moyenne
+- [ ] **Email de bienvenue** : Envoyer credentials aux nouveaux utilisateurs
+- [ ] **Assignation agents** : Assigner des clients/centres à des agents spécifiques
+- [ ] **Rapports/Stats** : Dashboard avec métriques avancées par période
+
+### Priorité Basse
+- [ ] **Confirmation email** : Flow complet de vérification email
+- [ ] **Multi-langue** : Support FR/EN
+- [ ] **Export données** : Export CSV/Excel des clients/reminders
+
+---
+
 ## 🔗 Liens Utiles
 
 - [Supabase Dashboard](https://supabase.com/dashboard/project/aefzpamcvbzzcgwkuita)
