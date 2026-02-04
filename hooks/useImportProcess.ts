@@ -758,12 +758,9 @@ export function useImportProcess() {
           const numeroAppelCentre = techCenter?.phone || '';
           const templateName = techCenter?.template_name || undefined; // Utilise le template du centre ou le défaut
 
-          // Préparer les variables du template
-          const datePrecedentVisite = formatDateForMessage(clientData.last_visit);
-          // Utiliser les champs séparés ou fallback sur parseVehicle
-          const marque = clientData.marque || parseVehicle(clientData.vehicle).marque;
-          const modele = clientData.modele || parseVehicle(clientData.vehicle).modele;
-          const immat = clientData.immatriculation || '';
+          // Préparer les variables du template simplifié (2 variables)
+          // Combiner le nom du centre avec le réseau: "Bourg-la-Reine - Autosur"
+          const centreComplet = typeCentre ? `${nomCentre} - ${typeCentre}` : nomCentre;
           const dateProchVis = formatDateForMessage(client.due_date);
           
           // Send WhatsApp message avec le template du centre
@@ -771,13 +768,8 @@ export function useImportProcess() {
           const whatsappResult = await sendRappelVisiteTechnique({
             to: client.phone,
             templateName,
-            datePrecedentVisite,
-            marque,
-            modele,
-            immat,
+            nomCentre: centreComplet,
             dateProchVis,
-            typeCentre,
-            nomCentre,
             shortUrlRendezVous,
             numeroAppelCentre,
           });

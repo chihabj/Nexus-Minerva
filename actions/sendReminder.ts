@@ -144,12 +144,9 @@ export async function sendReminderAction(
     const numeroAppelCentre = techCenter?.phone || '';
     const templateName = techCenter?.template_name || undefined; // Utilise le template du centre ou le défaut
 
-    // 3. Préparer les variables du template
-    const datePrecedentVisite = formatDateForMessage(client.last_visit);
-    // Utiliser les champs séparés ou fallback sur parseVehicle
-    const marque = client.marque || parseVehicle(client.vehicle).marque;
-    const modele = client.modele || parseVehicle(client.vehicle).modele;
-    const immat = client.immatriculation || '';
+    // 3. Préparer les variables du template simplifié (2 variables)
+    // Combiner le nom du centre avec le réseau: "Bourg-la-Reine - Autosur"
+    const centreComplet = typeCentre ? `${nomCentre} - ${typeCentre}` : nomCentre;
     const dateProchVis = reminder.due_date 
       ? formatDateForMessage(reminder.due_date)
       : (() => {
@@ -165,26 +162,16 @@ export async function sendReminderAction(
 
     console.log(`📤 Envoi à ${cleanedPhone}:`, {
       templateName: templateName || 'rappel_visite_technique_vf (défaut)',
-      datePrecedentVisite,
-      marque,
-      modele,
-      immat,
+      centre: centreComplet,
       dateProchVis,
-      typeCentre,
-      nomCentre,
     });
 
     // 4. Envoyer le message WhatsApp avec le template du centre (ou template par défaut)
     const whatsappResult: WhatsAppResponse = await sendRappelVisiteTechnique({
       to: cleanedPhone,
       templateName,
-      datePrecedentVisite,
-      marque,
-      modele,
-      immat,
+      nomCentre: centreComplet,
       dateProchVis,
-      typeCentre,
-      nomCentre,
       shortUrlRendezVous,
       numeroAppelCentre,
     });

@@ -51,16 +51,11 @@ export interface WhatsAppTemplateParams {
 }
 
 /**
- * Paramètres spécifiques pour le template rappel_visite_technique
+ * Paramètres spécifiques pour le template rappel_visite_technique (v2 simplifié)
  * 
  * Variables du template:
- * - DatePrecedentVisite: Date de la précédente visite (format: DD/MM/YYYY)
- * - Marque: Marque du véhicule (ex: "Peugeot")
- * - Modele: Modèle du véhicule (ex: "308")
- * - Immat: Immatriculation du véhicule
- * - DateProchVis: Date de la prochaine visite (format: DD/MM/YYYY)
- * - TypeCentre: Type/réseau du centre (ex: "AUTOSUR")
- * - centre: Nom complet du centre (ex: "AUTOSUR - BOURG-LA-REINE")
+ * - {{1}} nomCentre: Nom complet du centre (ex: "Bourg-la-Reine - Autosur")
+ * - {{2}} dateProchVis: Date de la prochaine visite (format: DD/MM/YYYY)
  * 
  * Boutons:
  * - "Prendre RDV": Bouton URL avec la short_url du centre
@@ -68,16 +63,11 @@ export interface WhatsAppTemplateParams {
  */
 export interface RappelVisiteTechniqueParams {
   to: string;
-  templateName?: string; // Nom du template WhatsApp spécifique au centre (optionnel, défaut: rappel_visite_technique_vf)
-  datePrecedentVisite: string; // Format: DD/MM/YYYY
-  marque: string;
-  modele: string;
-  immat: string;
-  dateProchVis: string; // Format: DD/MM/YYYY
-  typeCentre: string;
-  nomCentre: string;
-  shortUrlRendezVous: string; // URL pour le bouton "Prendre RDV"
-  numeroAppelCentre: string; // Numéro de téléphone pour le bouton "Nous appeler"
+  templateName?: string; // Nom du template WhatsApp spécifique au centre
+  nomCentre: string;           // {{1}} - Ex: "Bourg-la-Reine - Autosur"
+  dateProchVis: string;        // {{2}} - Format: DD/MM/YYYY
+  shortUrlRendezVous: string;  // URL pour le bouton "Prendre RDV"
+  numeroAppelCentre: string;   // Numéro de téléphone pour le bouton "Nous appeler"
 }
 
 /**
@@ -197,16 +187,11 @@ export async function sendWhatsAppTemplate({
 }
 
 /**
- * Envoie le template "rappel_visite_technique_vf" avec les variables du client
+ * Envoie le template rappel visite technique (v2 simplifié) avec les variables du client
  * 
  * Variables du template (dans l'ordre):
- * - DatePrecedentVisite: Date de la précédente visite
- * - Marque: Marque du véhicule
- * - Modele: Modèle du véhicule
- * - Immat: Immatriculation
- * - DateProchVis: Date de la prochaine visite
- * - TypeCentre: Type/réseau du centre
- * - centre: Nom complet du centre
+ * - {{1}} nomCentre: Nom complet du centre (ex: "Bourg-la-Reine - Autosur")
+ * - {{2}} dateProchVis: Date de la prochaine visite
  * 
  * Boutons:
  * - Index 0: "Prendre RDV" (URL)
@@ -215,13 +200,8 @@ export async function sendWhatsAppTemplate({
 export async function sendRappelVisiteTechnique({
   to,
   templateName,
-  datePrecedentVisite,
-  marque,
-  modele,
-  immat,
-  dateProchVis,
-  typeCentre,
   nomCentre,
+  dateProchVis,
   shortUrlRendezVous,
   numeroAppelCentre,
 }: RappelVisiteTechniqueParams): Promise<WhatsAppResponse> {
@@ -229,15 +209,11 @@ export async function sendRappelVisiteTechnique({
   // Utiliser le template spécifique au centre, ou le template par défaut
   const finalTemplateName = templateName || 'rappel_visite_technique_vf';
   
-  // Templates par centre: 6 variables
-  // {{1}} datePrecedentVisite, {{2}} marque, {{3}} modele, {{4}} immat, {{5}} dateProchVis, {{6}} nomCentre
+  // Template simplifié: 2 variables
+  // {{1}} nomCentre, {{2}} dateProchVis
   const bodyParameters = [
-    { type: 'text', text: datePrecedentVisite || 'N/A' },  // {{1}} DatePrecedentVisite
-    { type: 'text', text: marque || 'N/A' },               // {{2}} Marque
-    { type: 'text', text: modele || 'N/A' },               // {{3}} Modele
-    { type: 'text', text: immat || 'N/A' },                // {{4}} Immat
-    { type: 'text', text: dateProchVis || 'N/A' },         // {{5}} DateProchVis
-    { type: 'text', text: nomCentre || 'N/A' },            // {{6}} NomCentre
+    { type: 'text', text: nomCentre || 'N/A' },      // {{1}} Centre
+    { type: 'text', text: dateProchVis || 'N/A' },   // {{2}} Date prochaine visite
   ];
 
   const components: TemplateComponent[] = [
@@ -245,8 +221,7 @@ export async function sendRappelVisiteTechnique({
       type: 'body',
       parameters: bodyParameters,
     },
-    // Bouton "Prendre RDV" (URL) - Seulement si le template a des boutons dynamiques
-    // Note: Pour les templates par centre avec boutons fixes, ces composants seront ignorés par l'API
+    // Bouton "Prendre RDV" (URL)
     {
       type: 'button',
       sub_type: 'url',
@@ -273,12 +248,11 @@ export async function sendRappelVisiteTechnique({
   ];
 
   // Pour les templates par centre (avec boutons statiques), ne pas envoyer les composants de boutons
-  // Les boutons URL et téléphone sont statiques et définis lors de la création du template
   const hasStaticButtons = templateName && templateName !== 'rappel_visite_technique_vf';
   
   const finalComponents = hasStaticButtons 
     ? components.filter(c => c.type !== 'button') // Seulement le body
-    : components; // Tous les composants pour le template par défaut
+    : components; // Tous les composants
 
   console.log(`📤 Utilisation du template: ${finalTemplateName} (boutons statiques: ${hasStaticButtons})`);
 

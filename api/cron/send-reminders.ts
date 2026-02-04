@@ -81,19 +81,15 @@ interface ReminderWithClient {
 
 /**
  * Interface pour les paramètres d'envoi WhatsApp
+ * Template simplifié avec 2 variables: centre + date prochaine visite
  */
 interface WhatsAppTemplateParams {
   to: string;
   templateName: string;
-  datePrecedentVisite: string;
-  marque: string;
-  modele: string;
-  immat: string;
-  dateProchVis: string;
-  typeCentre: string;
-  nomCentre: string;
-  shortUrlRendezVous: string;
-  numeroAppelCentre: string;
+  nomCentre: string;           // {{1}} - Ex: "Bourg-la-Reine - Autosur"
+  dateProchVis: string;        // {{2}} - Ex: "01/03/2026"
+  shortUrlRendezVous: string;  // URL bouton RDV
+  numeroAppelCentre: string;   // Numéro bouton Appeler
 }
 
 /**
@@ -132,13 +128,8 @@ async function sendWhatsAppTemplate(
               {
                 type: 'body',
                 parameters: [
-                  { type: 'text', text: params.datePrecedentVisite || 'N/A' },
-                  { type: 'text', text: params.marque || 'N/A' },
-                  { type: 'text', text: params.modele || 'N/A' },
-                  { type: 'text', text: params.immat || 'N/A' },
-                  { type: 'text', text: params.dateProchVis || 'N/A' },
-                  { type: 'text', text: params.typeCentre || 'N/A' },
-                  { type: 'text', text: params.nomCentre || 'N/A' },
+                  { type: 'text', text: params.nomCentre || 'N/A' },      // {{1}} - Centre
+                  { type: 'text', text: params.dateProchVis || 'N/A' },   // {{2}} - Date prochaine visite
                 ],
               },
               // Boutons (seront ignorés si le template a des boutons fixes)
@@ -336,25 +327,17 @@ async function processWorkflowStep(
       const numeroAppelCentre = techCenter?.phone || '';
       const templateName = techCenter?.template_name || 'rappel_visite_technique_vf';
 
-      // Préparer les variables du template
-      const datePrecedentVisite = formatDateForMessage(clientData.last_visit);
-      // Utiliser les champs séparés ou fallback sur parseVehicle
-      const marque = clientData.marque || parseVehicle(clientData.vehicle).marque;
-      const modele = clientData.modele || parseVehicle(clientData.vehicle).modele;
-      const immat = clientData.immatriculation || '';
+      // Préparer les variables du template simplifié (2 variables)
+      // Combiner le type de centre et le nom: "Bourg-la-Reine - Autosur"
+      const centreComplet = typeCentre ? `${nomCentre} - ${typeCentre}` : nomCentre;
       const dateProchVis = formatDateForMessage(reminder.due_date);
 
       // Send WhatsApp message avec le template du centre
       const result = await sendWhatsAppTemplate({
         to: clientData.phone,
         templateName,
-        datePrecedentVisite,
-        marque,
-        modele,
-        immat,
-        dateProchVis,
-        typeCentre,
-        nomCentre,
+        nomCentre: centreComplet,      // {{1}} - Centre complet
+        dateProchVis,                   // {{2}} - Date prochaine visite
         shortUrlRendezVous,
         numeroAppelCentre,
       });
