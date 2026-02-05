@@ -1,0 +1,44 @@
+# Cursor Rules - Minerva CT / Nexus Connect CRM
+
+## Documentation Reference
+Toujours consulter `AGENT.md` à la racine du projet pour le contexte complet.
+
+## Règles Critiques
+
+### Base de données
+- NE JAMAIS truncate ou supprimer des données sans demande explicite
+- Utiliser la service_role key pour les scripts Node.js (bypass RLS)
+- URL Supabase : `aefzpamcvbzzcgwkuita.supabase.co`
+
+### WhatsApp
+- Rate limit : 1.5s minimum entre chaque message
+- Toujours logger les statuts dans `whatsapp_status_log`
+- Appeler `reconcileMessageStatus()` après chaque insertion de message
+
+### Git
+- Branche principale : `main`
+- Compte collaborateur : `chihabJekwip`
+- PowerShell : utiliser `;` au lieu de `&&`
+
+### Documentation
+- Mettre à jour `AGENT.md` après chaque fonctionnalité majeure
+- Incrémenter la version et ajouter au changelog
+
+## Fichiers Clés
+
+| Fichier | Description |
+|---------|-------------|
+| `AGENT.md` | Documentation complète du projet |
+| `api/webhook.ts` | Webhook WhatsApp (statuts + messages) |
+| `api/cron/send-reminders.ts` | Cron job relances (10h30 Paris) |
+| `hooks/useImportProcess.ts` | Import + batch sending |
+| `services/statusReconciliation.ts` | Réconciliation statuts WhatsApp |
+
+## Workflow Standard
+
+1. Lire `AGENT.md` pour le contexte
+2. Identifier les fichiers concernés
+3. Implémenter en respectant les patterns existants
+4. Tester
+5. Mettre à jour `AGENT.md` si nécessaire
+6. Commiter avec message descriptif

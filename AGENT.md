@@ -4,6 +4,24 @@
 
 ---
 
+## 📌 Métadonnées Documentation
+
+| Info | Valeur |
+|------|--------|
+| **Version** | 2.1.0 |
+| **Dernière mise à jour** | 2026-01-23 |
+| **Branche principale** | main |
+| **Branche active** | feature/clickable-notifications |
+
+### Historique des mises à jour
+| Version | Date | Description |
+|---------|------|-------------|
+| 2.1.0 | 2026-01-23 | Ajout système de log des statuts WhatsApp + réconciliation |
+| 2.0.0 | 2026-01-23 | Notifications cliquables + batch sending avec rate limit |
+| 1.0.0 | 2026-01-22 | Version initiale de la documentation |
+
+---
+
 ## 📋 Projet Overview
 
 | Attribut | Valeur |
@@ -49,12 +67,16 @@
 
 /hooks/
   useDashboardData.ts    # Logique KPIs et tables dashboard
-  useImportProcess.ts    # Logique d'import avec mapping AI
+  useImportProcess.ts    # Logique d'import avec mapping AI + batch sending
 
 /services/
   supabaseClient.ts      # Client Supabase (anon key)
   whatsapp.ts            # Envoi messages WhatsApp (frontend)
   geminiService.ts       # AI pour mapping colonnes CSV
+  statusReconciliation.ts # Réconciliation des statuts WhatsApp (NEW)
+
+/actions/
+  sendReminder.ts        # Envoi de relances WhatsApp unitaires et batch
 
 /utils/
   centerMatcher.ts       # Matching centres par similarité de nom
@@ -68,7 +90,9 @@
   truncate-clients.mjs   # Vider la base clients (+ reminders, messages, etc.)
   create-superadmin.mjs  # Créer utilisateurs admin
   setup-database.mjs     # Setup initial DB
-  check-*.mjs            # Scripts de diagnostic
+  check-db-state.mjs     # Vérifier l'état des tables
+  fix-sent-conversations.mjs  # Réparer les conversations
+  create-status-log-table.sql # SQL pour la table de log des statuts
 ```
 
 ---
@@ -136,6 +160,8 @@ export const REMINDER_SENT_STATUSES = ['Reminder1_sent', 'Reminder2_sent', 'Remi
 | `notifications` | Notifications agents | user_id → user_profiles |
 | `message_templates` | Réponses rapides | - |
 | `reminder_logs` | Historique des relances | reminder_id → reminders |
+| `reminder_steps` | Configuration workflow (jours) | - |
+| `whatsapp_status_log` | **NEW** Log de tous les statuts WhatsApp | message_id → messages |
 
 ### Champs importants clients
 - `whatsapp_available` (boolean) : false = ne jamais envoyer WhatsApp
@@ -146,6 +172,125 @@ export const REMINDER_SENT_STATUSES = ['Reminder1_sent', 'Reminder2_sent', 'Remi
 - `status_changed_at` : Date du dernier changement de statut (pour KPIs)
 - `last_reminder_sent` : 'J30' | 'J15' | 'J7' | null
 - `response_received_at` : Date de réponse client
+
+### Table whatsapp_status_log (NOUVELLE)
+```sql
+CREATE TABLE whatsapp_status_log (
+  id UUID PRIMARY KEY,
+  created_at TIMESTAMPTZ,
+  wa_message_id TEXT NOT NULL,     -- ID message WhatsApp (clé de réconciliation)
+  status TEXT NOT NULL,            -- sent, delivered, read, failed
+  recipient_phone TEXT,
+  errors JSONB,
+  processed BOOLEAN DEFAULT FALSE, -- TRUE si appliqué au message
+  processed_at TIMESTAMPTZ,
+  message_id UUID REFERENCES messages(id)
+);
+```
+
+**But** : Stocker TOUS les statuts WhatsApp reçus via webhook pour :
+1. Traçabilité complète
+2. Réconciliation (quand le webhook arrive avant l'insertion du message)
+
+---
+
+## 📱 WhatsApp Integration
+
+### Webhook (api/webhook.ts)
+- **GET** : Vérification Meta (`hub.verify_token`)
+- **POST** : Réception messages entrants + statuts de livraison
+
+### Flux de statut avec réconciliation
+
+```
+1. Message envoyé → API WhatsApp retourne wa_message_id
+2. Meta envoie webhook "delivered" (peut arriver AVANT insertion en base)
+3. Webhook → TOUJOURS logger dans whatsapp_status_log (processed=false)
+4. Webhook → Tente de mettre à jour le message
+   - Si trouvé → update + log processed=true
+   - Si non trouvé → log reste processed=false
+5. Message inséré en base de données
+6. Réconciliation → Cherche les statuts en attente pour ce wa_message_id
+7. Applique le statut le plus récent (read > delivered > sent)
+8. Marque les logs comme processed=true
+```
+
+### Gestion des erreurs Meta
+| Code | Signification | Action |
+|------|---------------|--------|
+| `131026` | Numéro sans WhatsApp | `whatsapp_available=false` + `To_be_called` |
+| `131049` | Spam protection | Note système, pas de désactivation |
+| `131047/48` | Rate limiting | Note système, pas de désactivation |
+
+### Rate Limiting et Batch Sending
+
+**Configuration (useImportProcess.ts)** :
+```typescript
+const BATCH_CONFIG = {
+  BATCH_SIZE: 10,                    // Messages par batch
+  DELAY_BETWEEN_MESSAGES: 1500,      // 1.5s entre chaque message
+  DELAY_BETWEEN_BATCHES: 10000,      // 10s entre chaque batch
+  RATE_LIMIT_PAUSE: 30000,           // 30s pause si rate limit détecté
+};
+```
+
+**Détection rate limit** :
+- Code HTTP 429
+- Code erreur Meta 130429
+- 3+ échecs consécutifs
+
+### Templates WhatsApp
+
+**⚠️ IMPORTANT** : Les boutons URL dans les templates Meta ne supportent PAS les URLs dynamiques. C'est pourquoi **un template par centre** est créé, avec l'URL de réservation en dur.
+
+#### Template simplifié (v2)
+Variables :
+- `{{1}}` : Nom du centre (ex: "Bourg-la-Reine - Autosur")
+- `{{2}}` : Date prochaine visite (ex: "01/03/2026")
+
+Boutons (statiques par centre) :
+- "Prendre RDV" → URL fixe du centre
+- "Appeler" → Numéro fixe du centre
+
+### Statuts de message affichés (Inbox)
+| Statut | Icône | Couleur |
+|--------|-------|---------|
+| `sent` | ✓ | Gris |
+| `delivered` | ✓✓ | Gris |
+| `read` | ✓✓ | Bleu |
+| `failed` | ❌ | Rouge |
+
+---
+
+## 🔔 Notifications
+
+### Types de notifications
+| Type | Icône | Description |
+|------|-------|-------------|
+| `info` | ℹ️ | Information générale |
+| `warning` | ⚠️ | Avertissement |
+| `success` | ✅ | Succès |
+| `action_required` | 🔔 | Action requise par l'agent |
+
+### Notifications cliquables (NEW v2.0)
+Les notifications peuvent contenir un `link` qui navigue vers la page concernée :
+
+```typescript
+// Exemple : notification de réponse client
+createNotificationForAdmins(
+  '💬 Nouveau message WhatsApp',
+  `${contactName}: ${content}`,
+  'info',
+  `/inbox?phone=${encodeURIComponent(cleanedFromPhone)}`  // Lien vers la conversation
+);
+```
+
+**Liens générés** :
+- Nouveau message → `/inbox?phone=33612345678`
+- Nouveau contact → `/inbox?phone=...`
+- Réponse client → `/inbox?phone=...`
+
+**UI** : Les notifications avec lien affichent "Cliquez pour voir" + icône chevron.
 
 ---
 
@@ -190,48 +335,10 @@ WHATSAPP_VERIFY_TOKEN=nexus_webhook_verify_2024
 
 ---
 
-## 📱 WhatsApp Integration
-
-### Webhook (api/webhook.ts)
-- **GET** : Vérification Meta (`hub.verify_token`)
-- **POST** : Réception messages entrants + statuts de livraison
-
-### Gestion des erreurs Meta
-| Code | Signification | Action |
-|------|---------------|--------|
-| `131026` | Numéro sans WhatsApp | `whatsapp_available=false` + `To_be_called` |
-| `131049` | Spam protection | Note système, pas de désactivation |
-| `131047/48` | Rate limiting | Note système, pas de désactivation |
-
-### Templates WhatsApp
-
-**⚠️ IMPORTANT** : Les boutons URL dans les templates Meta ne supportent PAS les URLs dynamiques. C'est pourquoi **un template par centre** est créé, avec l'URL de réservation en dur.
-
-#### Template simplifié (v2)
-Variables :
-- `{{1}}` : Nom du centre (ex: "Bourg-la-Reine - Autosur")
-- `{{2}}` : Date prochaine visite (ex: "01/03/2026")
-
-Boutons (statiques par centre) :
-- "Prendre RDV" → URL fixe du centre
-- "Appeler" → Numéro fixe du centre
-
-#### Stockage templates par centre
-Chaque centre dans `tech_centers` a un champ `template_name` qui référence son template WhatsApp spécifique.
-
-### Types de messages trackés
-- `text` : Message texte normal
-- `template` : Message template envoyé
-- `button` / `interactive` : Clic sur bouton (Quick Reply uniquement)
-- `image`, `document`, `audio`, `video` : Médias
-
-**Note** : Les boutons URL et Phone ne génèrent PAS de callback webhook (l'action sort de WhatsApp).
-
----
-
 ## 🚀 Cron Job (api/cron/send-reminders.ts)
 
 - **Horaire** : 10h30 Paris (`30 9 * * *` dans vercel.json)
+- **Délai entre envois** : 1500ms (rate limit protection)
 - **Workflow** :
   - J-30 : `New` → `Reminder1_sent`
   - J-15 : `Reminder1_sent`/`Pending` → `Reminder2_sent`
@@ -254,6 +361,9 @@ Chaque centre dans `tech_centers` a un champ `template_name` qui référence son
 5. **Normalisation téléphone** = Format E.164 (+33..., +212...)
 6. **Boutons URL/Phone** = Pas de tracking possible (pas de callback Meta)
 7. **Quick Reply buttons** = Seuls boutons trackables via webhook
+8. **Rate limiting** = 1.5s entre chaque message, pause 30s si détecté
+9. **Statuts WhatsApp** = TOUJOURS loggés dans whatsapp_status_log
+10. **Réconciliation** = Automatique après chaque insertion de message
 
 ---
 
@@ -266,14 +376,14 @@ node scripts/truncate-clients.mjs
 # Créer un utilisateur admin
 node scripts/create-superadmin.mjs
 
-# Vérifier statuts des reminders
-node scripts/check-reminders-status.mjs
+# Vérifier l'état de la base de données
+node scripts/check-db-state.mjs
 
-# Vérifier conversations
-node scripts/check-conversations.mjs
+# Réparer les conversations mal loguées
+node scripts/fix-sent-conversations.mjs
 
-# Vérifier statut WhatsApp des clients
-node scripts/check-whatsapp-status.mjs
+# Vérifier si la table whatsapp_status_log existe
+node scripts/run-sql.mjs
 ```
 
 ### Connexion directe Supabase (pour scripts)
@@ -297,16 +407,30 @@ const supabase = createClient(
 5. **Duplications messages** : Vérifier `wa_message_id` pour éviter doublons
 6. **Git credentials** : Le compte `chihabJekwip` est collaborateur du repo
 7. **Cron timing** : 10h30 Paris = 9h30 UTC (`30 9 * * *`)
+8. **Race condition statuts** : Le webhook peut arriver AVANT l'insertion → utiliser la réconciliation
+9. **Truncate DB** : NE JAMAIS truncate sans demande explicite de l'utilisateur
+10. **PowerShell** : `&&` ne fonctionne pas, utiliser `;` ou commandes séparées
 
 ---
 
 ## 📝 Changelog Notable
 
-- **Template WhatsApp v2** : Simplifié à 2 variables (centre + date)
-- **Dashboard redesign** : KPIs cliquables + tables urgences
-- **TodoList** : Ajout statut "Pending", scroll complet
-- **Inbox** : Notification visuelle pour clics de boutons
-- **Clients** : Colonne "Matricule" au lieu de "Véhicule"
+### v2.1.0 (2026-01-23)
+- **whatsapp_status_log** : Nouvelle table pour logger tous les statuts
+- **Réconciliation automatique** : Service `statusReconciliation.ts`
+- **Webhook amélioré** : Log avant update pour éviter la perte de statuts
+
+### v2.0.0 (2026-01-23)
+- **Notifications cliquables** : Navigation vers la conversation
+- **Batch sending** : Rate limit protection (1.5s entre messages)
+- **Progress indicator** : Affichage progression pendant l'import
+
+### v1.x
+- Template WhatsApp v2 : Simplifié à 2 variables (centre + date)
+- Dashboard redesign : KPIs cliquables + tables urgences
+- TodoList : Ajout statut "Pending", scroll complet
+- Inbox : Notification visuelle pour clics de boutons
+- Clients : Colonne "Matricule" au lieu de "Véhicule"
 
 ---
 
@@ -319,6 +443,7 @@ const supabase = createClient(
 - [ ] **UTM Tracking** : Ajouter tracking des clics boutons URL via raccourcisseur
 
 ### Priorité Moyenne
+- [ ] **Cron réconciliation** : Endpoint pour réconcilier les statuts orphelins
 - [ ] **Email de bienvenue** : Envoyer credentials aux nouveaux utilisateurs
 - [ ] **Assignation agents** : Assigner des clients/centres à des agents spécifiques
 - [ ] **Rapports/Stats** : Dashboard avec métriques avancées par période
@@ -336,3 +461,26 @@ const supabase = createClient(
 - [Meta Business Manager](https://business.facebook.com/)
 - [Vercel Dashboard](https://vercel.com/)
 - [WhatsApp API Docs](https://developers.facebook.com/docs/whatsapp/cloud-api/)
+
+---
+
+## 📚 Comment Mettre à Jour Cette Documentation
+
+### Quand mettre à jour
+- Nouvelle fonctionnalité majeure
+- Nouvelle table en base de données
+- Changement de workflow
+- Nouveau script utilitaire
+- Bug important corrigé
+
+### Comment mettre à jour
+1. Incrémenter la version dans les métadonnées
+2. Ajouter une ligne dans l'historique des mises à jour
+3. Mettre à jour la section concernée
+4. Ajouter au changelog si notable
+5. Commiter avec message `docs: update AGENT.md to vX.Y.Z`
+
+### Conventions de version
+- **MAJOR** (X.0.0) : Changement majeur d'architecture ou de workflow
+- **MINOR** (0.X.0) : Nouvelle fonctionnalité
+- **PATCH** (0.0.X) : Correction ou mise à jour mineure de la doc
