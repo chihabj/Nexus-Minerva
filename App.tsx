@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HashRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Dashboard from './views/Dashboard';
 import Inbox from './views/Inbox';
@@ -155,6 +155,7 @@ const TopBar = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const toggleDark = () => {
     setDark(!dark);
@@ -191,6 +192,22 @@ const TopBar = () => {
       supabase.removeChannel(channel);
     };
   }, [user]);
+
+  const handleNotificationClick = async (notif: Notification) => {
+    // Mark as read
+    await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', notif.id);
+    
+    setNotifications(prev => prev.filter(n => n.id !== notif.id));
+    setShowNotifications(false);
+    
+    // Navigate to the link if present
+    if (notif.link) {
+      navigate(notif.link);
+    }
+  };
 
   const markAsRead = async (id: string) => {
     await supabase
@@ -245,11 +262,13 @@ const TopBar = () => {
                   notifications.map(notif => (
                     <div 
                       key={notif.id} 
-                      className="p-3 hover:bg-slate-50 dark:hover:bg-slate-800 border-b border-slate-50 dark:border-slate-800 cursor-pointer"
-                      onClick={() => markAsRead(notif.id)}
+                      className={`p-3 hover:bg-slate-50 dark:hover:bg-slate-800 border-b border-slate-50 dark:border-slate-800 cursor-pointer transition-colors ${
+                        notif.link ? 'hover:bg-primary/5 dark:hover:bg-primary/10' : ''
+                      }`}
+                      onClick={() => handleNotificationClick(notif)}
                     >
                       <div className="flex items-start gap-3">
-                        <span className={`material-symbols-outlined text-lg ${
+                        <span className={`material-symbols-outlined text-lg flex-shrink-0 ${
                           notif.type === 'error' ? 'text-red-500' :
                           notif.type === 'warning' ? 'text-amber-500' :
                           notif.type === 'success' ? 'text-green-500' :
@@ -265,7 +284,18 @@ const TopBar = () => {
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{notif.title}</p>
                           <p className="text-xs text-slate-500 line-clamp-2">{notif.message}</p>
+                          {notif.link && (
+                            <p className="text-[10px] text-primary mt-1 flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[12px]">open_in_new</span>
+                              Cliquez pour voir
+                            </p>
+                          )}
                         </div>
+                        {notif.link && (
+                          <span className="material-symbols-outlined text-slate-400 text-lg flex-shrink-0">
+                            chevron_right
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))

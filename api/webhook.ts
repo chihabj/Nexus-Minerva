@@ -247,12 +247,12 @@ async function handleClientResponse(phone: string, content: string, clientId: st
       .update({ client_id: actualClientId, client_name: contactName || cleanPhone })
       .eq('client_phone', cleanPhone);
     
-    // Notify admins
+    // Notify admins - link to conversation
     await createNotificationForAdmins(
       '🆕 Nouveau contact WhatsApp',
       `Message de ${contactName || cleanPhone}: "${content.substring(0, 80)}${content.length > 80 ? '...' : ''}" - À traiter dans la TodoList`,
       'action_required',
-      `/clients/${actualClientId}`
+      `/inbox?phone=${encodeURIComponent(cleanPhone)}`
     );
     
     return;
@@ -291,20 +291,20 @@ async function handleClientResponse(phone: string, content: string, clientId: st
       });
     }
     
-    // Create notification for agents - action required
+    // Create notification for agents - action required - link to conversation
     await createNotificationForAdmins(
       '⏸️ Réponse client - Action requise',
       `Le client a répondu: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}" - Veuillez traiter ce dossier.`,
       'action_required',
-      `/clients/${actualClientId}`
+      `/inbox?phone=${encodeURIComponent(cleanPhone)}`
     );
   } else {
-    // No active reminders found, just notify
+    // No active reminders found, just notify - link to conversation
     await createNotificationForAdmins(
       '💬 Réponse client',
       `Nouveau message du client: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`,
       'info',
-      `/inbox`
+      `/inbox?phone=${encodeURIComponent(cleanPhone)}`
     );
   }
 }
@@ -410,12 +410,13 @@ async function saveIncomingMessage(
     await handleClientResponse(message.from, messageContent, clientId || null, contactName);
   }
   
-  // Create notification for all admins
+  // Create notification for all admins - link to the specific conversation
+  const cleanedFromPhone = message.from.startsWith('+') ? message.from.substring(1) : message.from;
   await createNotificationForAdmins(
     '💬 Nouveau message WhatsApp',
     `${contactName || message.from}: ${messageContent?.substring(0, 50) || `[${message.type}]`}`,
     'info',
-    '/inbox'
+    `/inbox?phone=${encodeURIComponent(cleanedFromPhone)}`
   );
   
   return data;
