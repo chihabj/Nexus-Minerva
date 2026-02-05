@@ -12,6 +12,7 @@ import {
 } from '../utils/dataNormalizer';
 import { supabase } from '../services/supabaseClient';
 import { sendRappelVisiteTechnique } from '../services/whatsapp';
+import { reconcileMessageStatus } from '../services/statusReconciliation';
 import { MappingField, MappingConfidence } from '../types';
 import { matchCenter, loadCenters, invalidateCentersCache } from '../utils/centerMatcher';
 
@@ -898,7 +899,7 @@ export function useImportProcess() {
                 if (conversationId!) {
                   const messageContent = `Madame, Monsieur,\n\nNous avons eu le plaisir de contrôler votre véhicule dans notre centre ${centreComplet}.\n\nLa validité de ce contrôle technique arrivant bientôt à échéance, le prochain devra s'effectuer avant le : ${dateProchVis}.\n\nNous vous invitons à prendre rendez-vous en ligne ou par téléphone.`;
                   
-                  const { error: msgError } = await supabase
+                  const { data: newMessage, error: msgError } = await supabase
                     .from('messages')
                     .insert({
                       conversation_id: conversationId,
@@ -910,12 +911,25 @@ export function useImportProcess() {
                       content: messageContent,
                       template_name: templateName || 'rappel_visite_technique_vf',
                       status: 'sent',
-                    });
+                    })
+                    .select('id')
+                    .single();
                   
                   if (msgError) {
                     console.error('❌ Erreur insertion message:', msgError);
                   } else {
                     console.log('✅ Message inséré pour conversation:', conversationId);
+                    
+                    // Réconcilier les statuts qui sont peut-être arrivés avant l'insertion
+                    if (whatsappResult.messageId && newMessage?.id) {
+                      const reconciledStatus = await reconcileMessageStatus(
+                        whatsappResult.messageId,
+                        newMessage.id
+                      );
+                      if (reconciledStatus) {
+                        console.log(`🔄 Statut réconcilié: ${reconciledStatus}`);
+                      }
+                    }
                   }
                 }
               } catch (convError) {

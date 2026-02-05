@@ -424,6 +424,7 @@ async function saveIncomingMessage(
 
 /**
  * Update message status (sent/delivered/read/failed)
+ * Logs ALL status updates to whatsapp_status_log for traceability and reconciliation
  */
 async function updateMessageStatus(
   waMessageId: string, 
@@ -431,7 +432,27 @@ async function updateMessageStatus(
   errors?: Array<{ code: number; title: string }>,
   recipientPhone?: string
 ) {
-  // Update message status
+  // 1. ALWAYS log the status first (for traceability and reconciliation)
+  const { data: statusLog, error: logError } = await supabase
+    .from('whatsapp_status_log')
+    .insert({
+      wa_message_id: waMessageId,
+      status,
+      recipient_phone: recipientPhone || null,
+      errors: errors || null,
+      processed: false,
+    })
+    .select('id')
+    .single();
+
+  if (logError) {
+    console.error('❌ Error logging status to whatsapp_status_log:', logError);
+    // Continue anyway - don't fail because of logging
+  } else {
+    console.log(`📋 Status logged: ${waMessageId} -> ${status} (log_id: ${statusLog?.id})`);
+  }
+
+  // 2. Try to update the message
   const updateData: any = { status };
   
   // If failed, add error message
@@ -447,8 +468,21 @@ async function updateMessageStatus(
     .single();
 
   if (error) {
-    console.error('Error updating message status:', error);
+    // Message not found - log remains unprocessed for later reconciliation
+    console.warn(`⚠️ Message ${waMessageId} not found for status update (${status}). Will be reconciled later.`);
     return;
+  }
+  
+  // 3. Message found - mark log as processed
+  if (statusLog?.id) {
+    await supabase
+      .from('whatsapp_status_log')
+      .update({ 
+        processed: true, 
+        processed_at: new Date().toISOString(),
+        message_id: message.id,
+      })
+      .eq('id', statusLog.id);
   }
   
   console.log(`✅ Message ${waMessageId} status updated to ${status}`);

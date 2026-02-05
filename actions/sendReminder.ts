@@ -4,6 +4,7 @@
 
 import { sendRappelVisiteTechnique, cleanPhoneNumber, WhatsAppResponse } from '../services/whatsapp';
 import { supabase } from '../services/supabaseClient';
+import { reconcileMessageStatus } from '../services/statusReconciliation';
 
 export interface SendReminderResult {
   success: boolean;
@@ -275,7 +276,7 @@ export async function sendReminderAction(
         // Construire le contenu du message avec les variables disponibles
         const messageContent = `Madame, Monsieur,\n\nNous avons eu le plaisir de contrôler votre véhicule dans notre centre ${centreComplet}.\n\nLa validité de ce contrôle technique arrivant bientôt à échéance, le prochain devra s'effectuer avant le : ${dateProchVis}.\n\nNous vous invitons à prendre rendez-vous en ligne ou par téléphone.`;
         
-        const { error: msgError } = await supabase
+        const { data: newMessage, error: msgError } = await supabase
           .from('messages')
           .insert({
             conversation_id: conversationId,
@@ -287,12 +288,25 @@ export async function sendReminderAction(
             content: messageContent,
             template_name: templateName || 'rappel_visite_technique_vf',
             status: 'sent',
-          });
+          })
+          .select('id')
+          .single();
         
         if (msgError) {
           console.error('❌ Erreur insertion message:', msgError);
         } else {
           console.log('✅ Message inséré pour conversation:', conversationId);
+          
+          // Réconcilier les statuts qui sont peut-être arrivés avant l'insertion
+          if (whatsappResult.messageId && newMessage?.id) {
+            const reconciledStatus = await reconcileMessageStatus(
+              whatsappResult.messageId,
+              newMessage.id
+            );
+            if (reconciledStatus) {
+              console.log(`🔄 Statut réconcilié: ${reconciledStatus}`);
+            }
+          }
         }
       }
     } catch (convError) {

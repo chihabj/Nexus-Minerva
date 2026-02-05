@@ -196,6 +196,19 @@ export interface Notification {
   created_at: string;
 }
 
+// WhatsApp Status Log (pour traçabilité et réconciliation)
+export interface WhatsAppStatusLog {
+  id: string;
+  created_at: string;
+  wa_message_id: string;
+  status: 'sent' | 'delivered' | 'read' | 'failed';
+  recipient_phone: string | null;
+  errors: Array<{ code: number; title: string }> | null;
+  processed: boolean;
+  processed_at: string | null;
+  message_id: string | null;
+}
+
 // Message Template (pre-registered quick replies)
 export interface MessageTemplate {
   id: string;
