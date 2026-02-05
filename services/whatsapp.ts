@@ -27,6 +27,7 @@ export interface WhatsAppResponse {
   success: boolean;
   messageId?: string;
   error?: string;
+  isRateLimited?: boolean;
 }
 
 export interface TemplateParameter {
@@ -165,9 +166,22 @@ export async function sendWhatsAppTemplate({
 
     if (!response.ok) {
       console.error('❌ WhatsApp API Error:', data);
+      
+      // Detect rate limiting (HTTP 429 or specific error codes)
+      const isRateLimited = response.status === 429 || 
+        data.error?.code === 130429 || // WhatsApp rate limit error code
+        data.error?.message?.toLowerCase().includes('rate') ||
+        data.error?.message?.toLowerCase().includes('limit') ||
+        data.error?.message?.toLowerCase().includes('too many');
+      
+      if (isRateLimited) {
+        console.warn('🚨 Rate limit détecté par l\'API WhatsApp');
+      }
+      
       return {
         success: false,
         error: data.error?.message || `Erreur API: ${response.status}`,
+        isRateLimited,
       };
     }
 
@@ -179,9 +193,11 @@ export async function sendWhatsAppTemplate({
     };
   } catch (error) {
     console.error('❌ WhatsApp API Exception:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Erreur réseau';
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Erreur réseau',
+      error: errorMessage,
+      isRateLimited: errorMessage.toLowerCase().includes('rate') || errorMessage.toLowerCase().includes('limit'),
     };
   }
 }

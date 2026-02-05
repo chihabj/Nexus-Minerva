@@ -1,5 +1,5 @@
 import React, { useRef, useCallback } from 'react';
-import { useImportProcess, DB_FIELDS, ImportStep } from '../hooks/useImportProcess';
+import { useImportProcess, DB_FIELDS, ImportStep, BATCH_CONFIG } from '../hooks/useImportProcess';
 import { getSmartMappingSuggestions } from '../services/geminiService';
 
 export default function ImportData() {
@@ -15,6 +15,7 @@ export default function ImportData() {
     clientsForReminder,
     isLoading,
     error,
+    sendingProgress,
     parseFile,
     updateMapping,
     autoMatchColumns,
@@ -433,6 +434,66 @@ export default function ImportData() {
                 ))}
               </div>
 
+              {/* Progress indicator during sending */}
+              {sendingProgress && (
+                <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      {sendingProgress.status === 'sending' && (
+                        <div className="size-4 border-2 border-blue-500 border-t-transparent animate-spin rounded-full"></div>
+                      )}
+                      {sendingProgress.status === 'pausing' && (
+                        <span className="material-symbols-outlined text-amber-500">pause_circle</span>
+                      )}
+                      {sendingProgress.status === 'rate_limited' && (
+                        <span className="material-symbols-outlined text-red-500">warning</span>
+                      )}
+                      {sendingProgress.status === 'completed' && (
+                        <span className="material-symbols-outlined text-green-500">check_circle</span>
+                      )}
+                      <span className="font-bold text-slate-700 dark:text-slate-200">
+                        {sendingProgress.status === 'sending' && 'Envoi en cours...'}
+                        {sendingProgress.status === 'pausing' && `Pause entre batches (${BATCH_CONFIG.DELAY_BETWEEN_BATCHES / 1000}s)...`}
+                        {sendingProgress.status === 'rate_limited' && 'Pause rate limit (30s)...'}
+                        {sendingProgress.status === 'completed' && 'Envoi terminé !'}
+                      </span>
+                    </div>
+                    <span className="text-sm text-slate-600 dark:text-slate-400">
+                      Batch {sendingProgress.currentBatch}/{sendingProgress.totalBatches}
+                    </span>
+                  </div>
+                  
+                  {/* Progress bar */}
+                  <div className="w-full h-3 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-2">
+                    <div 
+                      className={`h-full transition-all duration-300 ${
+                        sendingProgress.status === 'completed' ? 'bg-green-500' :
+                        sendingProgress.status === 'rate_limited' ? 'bg-red-500' :
+                        'bg-blue-500'
+                      }`}
+                      style={{ width: `${(sendingProgress.current / sendingProgress.total) * 100}%` }}
+                    ></div>
+                  </div>
+                  
+                  <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                    <span>{sendingProgress.current} / {sendingProgress.total} messages</span>
+                    <span className="flex items-center gap-3">
+                      <span className="text-green-600">{sendingProgress.successCount} réussis</span>
+                      {sendingProgress.failCount > 0 && (
+                        <span className="text-red-600">{sendingProgress.failCount} échoués</span>
+                      )}
+                    </span>
+                  </div>
+                  
+                  {/* Estimated time */}
+                  {sendingProgress.status === 'sending' && sendingProgress.current < sendingProgress.total && (
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      Temps estimé restant: ~{Math.ceil(((sendingProgress.total - sendingProgress.current) * BATCH_CONFIG.DELAY_BETWEEN_MESSAGES) / 1000 / 60)} min
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
                 <button
                   onClick={async () => {
@@ -452,10 +513,15 @@ export default function ImportData() {
                   disabled={isLoading}
                   className="px-6 py-2.5 bg-primary hover:bg-primary-dark text-white rounded-lg text-sm font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {isLoading ? (
+                  {isLoading && !sendingProgress ? (
                     <>
                       <div className="size-4 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
-                      Envoi en cours...
+                      Préparation...
+                    </>
+                  ) : isLoading && sendingProgress ? (
+                    <>
+                      <div className="size-4 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
+                      {sendingProgress.current}/{sendingProgress.total}
                     </>
                   ) : (
                     <>

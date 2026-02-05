@@ -100,6 +100,24 @@ export interface ClientForReminder {
   currentStep: number;
 }
 
+// Configuration for batch sending to avoid WhatsApp rate limits
+export const BATCH_CONFIG = {
+  BATCH_SIZE: 25,              // Messages per batch
+  DELAY_BETWEEN_MESSAGES: 1500, // 1.5 seconds between messages
+  DELAY_BETWEEN_BATCHES: 10000, // 10 seconds between batches
+  RATE_LIMIT_PAUSE: 30000,      // 30 seconds pause on rate limit
+};
+
+export interface SendingProgress {
+  current: number;
+  total: number;
+  currentBatch: number;
+  totalBatches: number;
+  status: 'sending' | 'pausing' | 'rate_limited' | 'completed';
+  successCount: number;
+  failCount: number;
+}
+
 export interface ImportState {
   step: ImportStep;
   file: File | null;
@@ -110,6 +128,7 @@ export interface ImportState {
   clientsForReminder: ClientForReminder[];
   isLoading: boolean;
   error: string | null;
+  sendingProgress: SendingProgress | null;
 }
 
 // Database fields configuration
@@ -143,6 +162,7 @@ export function useImportProcess() {
     clientsForReminder: [],
     isLoading: false,
     error: null,
+    sendingProgress: null,
   });
 
   // ==========================================
@@ -705,167 +725,261 @@ export function useImportProcess() {
       clientsForReminder: [],
       isLoading: false,
       error: null,
+      sendingProgress: null,
     });
   }, []);
 
   // ==========================================
-  // SEND REMINDERS IN BATCH
+  // SEND REMINDERS IN BATCH (with rate limiting protection)
   // ==========================================
 
   const sendRemindersBatch = useCallback(async (clientIds: string[]) => {
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    const { BATCH_SIZE, DELAY_BETWEEN_MESSAGES, DELAY_BETWEEN_BATCHES, RATE_LIMIT_PAUSE } = BATCH_CONFIG;
+    
+    const clientsToSend = state.clientsForReminder.filter(c => clientIds.includes(c.client_id));
+    const totalBatches = Math.ceil(clientsToSend.length / BATCH_SIZE);
+    
+    // Initialize progress
+    setState(prev => ({ 
+      ...prev, 
+      isLoading: true, 
+      error: null,
+      sendingProgress: {
+        current: 0,
+        total: clientsToSend.length,
+        currentBatch: 1,
+        totalBatches,
+        status: 'sending',
+        successCount: 0,
+        failCount: 0,
+      }
+    }));
+
+    const remindersToUpdate: Array<{ reminder_id: string; sent_at: string; status: string; current_step: number }> = [];
+    let successCount = 0;
+    let failCount = 0;
+    let consecutiveFailures = 0;
 
     try {
-      const clientsToSend = state.clientsForReminder.filter(c => clientIds.includes(c.client_id));
-      const remindersToUpdate: Array<{ reminder_id: string; sent_at: string; status: string; current_step: number }> = [];
-      let successCount = 0;
-      let failCount = 0;
+      // Process in batches
+      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        const batchStart = batchIndex * BATCH_SIZE;
+        const batchEnd = Math.min(batchStart + BATCH_SIZE, clientsToSend.length);
+        const currentBatch = clientsToSend.slice(batchStart, batchEnd);
+        
+        console.log(`📦 Batch ${batchIndex + 1}/${totalBatches}: envoi de ${currentBatch.length} messages...`);
 
-      for (const client of clientsToSend) {
-        try {
-          // Récupérer les informations complètes du client depuis la base de données
-          const { data: clientData, error: clientError } = await supabase
-            .from('clients')
-            .select('id, name, phone, vehicle, vehicle_year, marque, modele, immatriculation, last_visit, center_name, center_id')
-            .eq('id', client.client_id)
-            .single();
+        for (let i = 0; i < currentBatch.length; i++) {
+          const client = currentBatch[i];
+          const globalIndex = batchStart + i;
+          
+          // Update progress
+          setState(prev => ({
+            ...prev,
+            sendingProgress: prev.sendingProgress ? {
+              ...prev.sendingProgress,
+              current: globalIndex + 1,
+              currentBatch: batchIndex + 1,
+              status: 'sending',
+            } : null,
+          }));
 
-          if (clientError || !clientData) {
-            console.error(`❌ Error fetching client ${client.client_id}:`, clientError);
-            failCount++;
-            continue;
+          // Add delay between messages (except for the first message of the batch)
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_MESSAGES));
           }
 
-          // Récupérer les informations du centre technique
-          let techCenter: { name: string; phone: string | null; short_url: string | null; network: string | null; template_name: string | null } | null = null;
-          
-          if (clientData.center_name || clientData.center_id) {
-            const centerQuery = clientData.center_id 
-              ? supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('id', clientData.center_id).single()
-              : supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('name', clientData.center_name).single();
-            
-            const { data: centerData, error: centerError } = await centerQuery;
-            
-            if (!centerError && centerData) {
-              techCenter = centerData;
+          try {
+            // Récupérer les informations complètes du client depuis la base de données
+            const { data: clientData, error: clientError } = await supabase
+              .from('clients')
+              .select('id, name, phone, vehicle, vehicle_year, marque, modele, immatriculation, last_visit, center_name, center_id')
+              .eq('id', client.client_id)
+              .single();
+
+            if (clientError || !clientData) {
+              console.error(`❌ Error fetching client ${client.client_id}:`, clientError);
+              failCount++;
+              continue;
             }
-          }
 
-          // Valeurs par défaut si le centre n'est pas trouvé
-          const nomCentre = techCenter?.name || clientData.center_name || 'Notre centre';
-          const typeCentre = techCenter?.network || 'AUTOSUR'; // Valeur par défaut
-          const shortUrlRendezVous = techCenter?.short_url || '';
-          const numeroAppelCentre = techCenter?.phone || '';
-          const templateName = techCenter?.template_name || undefined; // Utilise le template du centre ou le défaut
-
-          // Préparer les variables du template simplifié (2 variables)
-          // Combiner le nom du centre avec le réseau: "Bourg-la-Reine - Autosur"
-          const centreComplet = typeCentre ? `${nomCentre} - ${typeCentre}` : nomCentre;
-          const dateProchVis = formatDateForMessage(client.due_date);
-          
-          // Send WhatsApp message avec le template du centre
-          console.log(`📤 Envoi avec template: ${templateName || 'rappel_visite_technique_vf (défaut)'}`);
-          const whatsappResult = await sendRappelVisiteTechnique({
-            to: client.phone,
-            templateName,
-            nomCentre: centreComplet,
-            dateProchVis,
-            shortUrlRendezVous,
-            numeroAppelCentre,
-          });
-          
-          if (whatsappResult.success) {
-            successCount++;
-            const sentAt = new Date().toISOString();
+            // Récupérer les informations du centre technique
+            let techCenter: { name: string; phone: string | null; short_url: string | null; network: string | null; template_name: string | null } | null = null;
             
-            remindersToUpdate.push({
-              reminder_id: client.reminder_id,
-              sent_at: sentAt,
-              status: client.initialStatus,
-              current_step: client.currentStep,
+            if (clientData.center_name || clientData.center_id) {
+              const centerQuery = clientData.center_id 
+                ? supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('id', clientData.center_id).single()
+                : supabase.from('tech_centers').select('name, phone, short_url, network, template_name').eq('name', clientData.center_name).single();
+              
+              const { data: centerData, error: centerError } = await centerQuery;
+              
+              if (!centerError && centerData) {
+                techCenter = centerData;
+              }
+            }
+
+            // Valeurs par défaut si le centre n'est pas trouvé
+            const nomCentre = techCenter?.name || clientData.center_name || 'Notre centre';
+            const typeCentre = techCenter?.network || 'AUTOSUR'; // Valeur par défaut
+            const shortUrlRendezVous = techCenter?.short_url || '';
+            const numeroAppelCentre = techCenter?.phone || '';
+            const templateName = techCenter?.template_name || undefined;
+
+            // Préparer les variables du template simplifié (2 variables)
+            const centreComplet = typeCentre ? `${nomCentre} - ${typeCentre}` : nomCentre;
+            const dateProchVis = formatDateForMessage(client.due_date);
+            
+            // Send WhatsApp message
+            console.log(`📤 [${globalIndex + 1}/${clientsToSend.length}] Envoi à ${client.phone}...`);
+            const whatsappResult = await sendRappelVisiteTechnique({
+              to: client.phone,
+              templateName,
+              nomCentre: centreComplet,
+              dateProchVis,
+              shortUrlRendezVous,
+              numeroAppelCentre,
             });
+            
+            if (whatsappResult.success) {
+              successCount++;
+              consecutiveFailures = 0; // Reset consecutive failures
+              const sentAt = new Date().toISOString();
+              
+              remindersToUpdate.push({
+                reminder_id: client.reminder_id,
+                sent_at: sentAt,
+                status: client.initialStatus,
+                current_step: client.currentStep,
+              });
 
-            // Créer ou récupérer la conversation pour ce client
-            try {
-              // Vérifier si une conversation existe déjà pour ce client
-              const { data: existingConv } = await supabase
-                .from('conversations')
-                .select('id')
-                .eq('client_id', client.client_id)
-                .single();
-
-              let conversationId: string;
-
-              if (existingConv) {
-                conversationId = existingConv.id;
-                // Mettre à jour la conversation existante
-                await supabase
+              // Créer ou récupérer la conversation pour ce client
+              try {
+                const { data: existingConv } = await supabase
                   .from('conversations')
-                  .update({
-                    last_message: `[Relance automatique] Template: ${templateName || 'rappel_visite_technique_vf'}`,
-                    last_message_at: sentAt,
-                    status: 'open',
-                  })
-                  .eq('id', conversationId);
-              } else {
-                // Créer une nouvelle conversation
-                const { data: newConv, error: convError } = await supabase
-                  .from('conversations')
-                  .insert({
-                    client_id: client.client_id,
-                    client_phone: client.phone,
-                    client_name: clientData.name,
-                    last_message: `[Relance automatique] Template: ${templateName || 'rappel_visite_technique_vf'}`,
-                    last_message_at: sentAt,
-                    unread_count: 0,
-                    status: 'open',
-                  })
                   .select('id')
+                  .eq('client_id', client.client_id)
                   .single();
 
-                if (convError || !newConv) {
-                  console.error('❌ Erreur création conversation:', convError);
-                } else {
-                  conversationId = newConv.id;
-                }
-              }
+                let conversationId: string;
 
-              // Créer le message outbound dans la conversation
-              if (conversationId!) {
-                // Construire le contenu du message avec les variables disponibles
-                const messageContent = `Madame, Monsieur,\n\nNous avons eu le plaisir de contrôler votre véhicule dans notre centre ${centreComplet}.\n\nLa validité de ce contrôle technique arrivant bientôt à échéance, le prochain devra s'effectuer avant le : ${dateProchVis}.\n\nNous vous invitons à prendre rendez-vous en ligne ou par téléphone.`;
-                
-                const { error: msgError } = await supabase
-                  .from('messages')
-                  .insert({
-                    conversation_id: conversationId,
-                    wa_message_id: whatsappResult.messageId || null,
-                    from_phone: '33767668396', // Numéro d'envoi WhatsApp Business
-                    to_phone: client.phone,
-                    direction: 'outbound',
-                    message_type: 'template',
-                    content: messageContent,
-                    template_name: templateName || 'rappel_visite_technique_vf',
-                    status: 'sent',
-                  });
-                
-                if (msgError) {
-                  console.error('❌ Erreur insertion message:', msgError);
+                if (existingConv) {
+                  conversationId = existingConv.id;
+                  await supabase
+                    .from('conversations')
+                    .update({
+                      last_message: `[Relance automatique] Template: ${templateName || 'rappel_visite_technique_vf'}`,
+                      last_message_at: sentAt,
+                      status: 'open',
+                    })
+                    .eq('id', conversationId);
                 } else {
-                  console.log('✅ Message inséré pour conversation:', conversationId);
+                  const { data: newConv, error: convError } = await supabase
+                    .from('conversations')
+                    .insert({
+                      client_id: client.client_id,
+                      client_phone: client.phone,
+                      client_name: clientData.name,
+                      last_message: `[Relance automatique] Template: ${templateName || 'rappel_visite_technique_vf'}`,
+                      last_message_at: sentAt,
+                      unread_count: 0,
+                      status: 'open',
+                    })
+                    .select('id')
+                    .single();
+
+                  if (convError || !newConv) {
+                    console.error('❌ Erreur création conversation:', convError);
+                  } else {
+                    conversationId = newConv.id;
+                  }
                 }
+
+                // Créer le message outbound dans la conversation
+                if (conversationId!) {
+                  const messageContent = `Madame, Monsieur,\n\nNous avons eu le plaisir de contrôler votre véhicule dans notre centre ${centreComplet}.\n\nLa validité de ce contrôle technique arrivant bientôt à échéance, le prochain devra s'effectuer avant le : ${dateProchVis}.\n\nNous vous invitons à prendre rendez-vous en ligne ou par téléphone.`;
+                  
+                  const { error: msgError } = await supabase
+                    .from('messages')
+                    .insert({
+                      conversation_id: conversationId,
+                      wa_message_id: whatsappResult.messageId || null,
+                      from_phone: '33767668396',
+                      to_phone: client.phone,
+                      direction: 'outbound',
+                      message_type: 'template',
+                      content: messageContent,
+                      template_name: templateName || 'rappel_visite_technique_vf',
+                      status: 'sent',
+                    });
+                  
+                  if (msgError) {
+                    console.error('❌ Erreur insertion message:', msgError);
+                  } else {
+                    console.log('✅ Message inséré pour conversation:', conversationId);
+                  }
+                }
+              } catch (convError) {
+                console.error('❌ Erreur création conversation/message:', convError);
               }
-            } catch (convError) {
-              console.error('❌ Erreur création conversation/message:', convError);
-              // On ne fail pas l'envoi si la création de conversation échoue
+              
+              // Update progress with success
+              setState(prev => ({
+                ...prev,
+                sendingProgress: prev.sendingProgress ? {
+                  ...prev.sendingProgress,
+                  successCount,
+                  failCount,
+                } : null,
+              }));
+            } else {
+              failCount++;
+              consecutiveFailures++;
+              console.warn(`⚠️ Failed to send WhatsApp for client ${client.client_id}:`, whatsappResult.error);
+              
+              // Check for rate limiting (API flag or 3+ consecutive failures)
+              const isRateLimited = whatsappResult.isRateLimited || consecutiveFailures >= 3;
+              if (isRateLimited) {
+                console.warn(`🚨 Rate limit détecté! Pause de ${RATE_LIMIT_PAUSE / 1000}s...`);
+                setState(prev => ({
+                  ...prev,
+                  sendingProgress: prev.sendingProgress ? {
+                    ...prev.sendingProgress,
+                    status: 'rate_limited',
+                    failCount,
+                  } : null,
+                }));
+                await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_PAUSE));
+                consecutiveFailures = 0; // Reset after pause
+              }
+              
+              // Update progress with failure
+              setState(prev => ({
+                ...prev,
+                sendingProgress: prev.sendingProgress ? {
+                  ...prev.sendingProgress,
+                  successCount,
+                  failCount,
+                } : null,
+              }));
             }
-          } else {
+          } catch (error) {
             failCount++;
-            console.warn(`⚠️ Failed to send WhatsApp for client ${client.client_id}:`, whatsappResult.error);
+            consecutiveFailures++;
+            console.error(`❌ Error sending WhatsApp for client ${client.client_id}:`, error);
           }
-        } catch (error) {
-          failCount++;
-          console.error(`❌ Error sending WhatsApp for client ${client.client_id}:`, error);
+        }
+
+        // Pause between batches (except after the last batch)
+        if (batchIndex < totalBatches - 1) {
+          console.log(`⏸️ Pause de ${DELAY_BETWEEN_BATCHES / 1000}s entre les batches...`);
+          setState(prev => ({
+            ...prev,
+            sendingProgress: prev.sendingProgress ? {
+              ...prev.sendingProgress,
+              status: 'pausing',
+            } : null,
+          }));
+          await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
         }
       }
 
@@ -883,14 +997,14 @@ export function useImportProcess() {
         }
       }
 
-      // Update remaining clients that weren't sent - set their status based on daysUntilDue
+      // Update remaining clients that weren't sent - set to Pending for retry
       const clientsNotSent = state.clientsForReminder.filter(c => 
         clientIds.includes(c.client_id) && 
         !remindersToUpdate.find(u => u.reminder_id === c.reminder_id)
       );
 
       for (const client of clientsNotSent) {
-        let finalStatus: 'New' | 'To_be_called' = 'New';
+        let finalStatus: 'Pending' | 'To_be_called' = 'Pending'; // Changed from 'New' to 'Pending' for retry
         let finalStep = 0;
         if (client.daysUntilDue <= 3) {
           finalStatus = 'To_be_called';
@@ -907,16 +1021,24 @@ export function useImportProcess() {
           .eq('id', client.reminder_id);
       }
 
+      // Final state update
       setState(prev => ({
         ...prev,
         clientsForReminder: prev.clientsForReminder.filter(c => !clientIds.includes(c.client_id)),
         isLoading: false,
+        sendingProgress: prev.sendingProgress ? {
+          ...prev.sendingProgress,
+          status: 'completed',
+          successCount,
+          failCount,
+        } : null,
       }));
 
+      console.log(`✅ Envoi terminé: ${successCount} réussis, ${failCount} échoués`);
       return { successCount, failCount };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send reminders';
-      setState(prev => ({ ...prev, isLoading: false, error: message }));
+      setState(prev => ({ ...prev, isLoading: false, error: message, sendingProgress: null }));
       throw error;
     }
   }, [state.clientsForReminder]);

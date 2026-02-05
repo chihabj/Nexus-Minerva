@@ -484,8 +484,8 @@ async function processWorkflowStep(
       results.calls_required++;
     }
 
-    // Small delay between sends to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Delay between sends to avoid WhatsApp rate limiting (1.5s recommended)
+    await new Promise(resolve => setTimeout(resolve, 1500));
   }
 }
 
