@@ -409,3 +409,45 @@ export async function markMessageAsRead(messageId: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Envoie le template de suivi "assistance_rdv" pour proposer un appel
+ * 
+ * Ce message est envoyé après qu'un client ait lu le premier message de relance
+ * mais n'a pas répondu après 2 heures.
+ * 
+ * Template Meta requis: "assistance_rdv"
+ * Corps: "Bonjour ! Suite à notre précédent message, souhaitez-vous qu'on vous appelle 
+ *         pour vous assister dans la prise de votre prochain rendez-vous ?"
+ * 
+ * Boutons Quick Reply (configurés dans Meta):
+ * - "Oui, appelez-moi"
+ * - "Non merci"
+ * 
+ * @param to - Numéro de téléphone du destinataire
+ * @param clientName - Nom du client (optionnel, pour personnaliser le message si le template le supporte)
+ */
+export async function sendAssistanceRdvTemplate(
+  to: string,
+  clientName?: string
+): Promise<WhatsAppResponse> {
+  
+  // Le template assistance_rdv peut avoir 1 variable optionnelle pour le nom
+  const components: TemplateComponent[] = clientName 
+    ? [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: clientName },
+          ],
+        },
+      ]
+    : [];
+
+  return sendWhatsAppTemplate({
+    to,
+    templateName: 'assistance_rdv',
+    languageCode: 'fr',
+    components,
+  });
+}

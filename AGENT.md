@@ -8,14 +8,15 @@
 
 | Info | Valeur |
 |------|--------|
-| **Version** | 2.1.0 |
+| **Version** | 2.2.0 |
 | **Dernière mise à jour** | 2026-01-23 |
 | **Branche principale** | main |
-| **Branche active** | feature/clickable-notifications |
+| **Branche active** | main |
 
 ### Historique des mises à jour
 | Version | Date | Description |
 |---------|------|-------------|
+| 2.2.0 | 2026-01-23 | Follow-up "Souhaitez-vous qu'on vous appelle?" avec Quick Reply |
 | 2.1.0 | 2026-01-23 | Ajout système de log des statuts WhatsApp + réconciliation |
 | 2.0.0 | 2026-01-23 | Notifications cliquables + batch sending avec rate limit |
 | 1.0.0 | 2026-01-22 | Version initiale de la documentation |
@@ -52,6 +53,7 @@
 /api/                    # Serverless functions Vercel
   webhook.ts             # Webhook WhatsApp (réception messages + statuts)
   cron/send-reminders.ts # Cron quotidien (10h30) - relances auto
+  cron/send-followups.ts # Cron horaire (9h-18h) - follow-up "Vous appeler?"
 
 /views/                  # Pages React
   Dashboard.tsx          # KPIs + Actions urgentes + Pipeline 30j
@@ -93,6 +95,7 @@
   check-db-state.mjs     # Vérifier l'état des tables
   fix-sent-conversations.mjs  # Réparer les conversations
   create-status-log-table.sql # SQL pour la table de log des statuts
+  add-followup-fields.sql     # SQL pour les champs follow_up sur reminders
 ```
 
 ---
@@ -104,7 +107,15 @@ IMPORT CLIENT
     ↓
   [New]
     ↓ (J-30 avant échéance)
-  [Reminder1_sent] → WhatsApp envoyé
+  [Reminder1_sent] → WhatsApp template envoyé
+    │
+    ├── Si message "read" + 2h sans réponse + heures ouvrées (9h-19h)
+    │   → Envoie follow-up "Souhaitez-vous qu'on vous appelle?"
+    │   → follow_up_sent = TRUE
+    │   │
+    │   ├── Client répond "Oui, appelez-moi" → [To_be_called] (sort du workflow)
+    │   └── Client répond "Non merci" → [Onhold]
+    │
     ↓ (J-15, si pas de réponse)
   [Reminder2_sent] → WhatsApp envoyé
     ↓ (J-7, si pas de réponse)
@@ -335,9 +346,11 @@ WHATSAPP_VERIFY_TOKEN=nexus_webhook_verify_2024
 
 ---
 
-## 🚀 Cron Job (api/cron/send-reminders.ts)
+## 🚀 Cron Jobs
 
-- **Horaire** : 10h30 Paris (`30 9 * * *` dans vercel.json)
+### 1. Relances automatiques (api/cron/send-reminders.ts)
+
+- **Horaire** : 10h30 Paris (`30 9 * * *`)
 - **Délai entre envois** : 1500ms (rate limit protection)
 - **Workflow** :
   - J-30 : `New` → `Reminder1_sent`
@@ -345,7 +358,24 @@ WHATSAPP_VERIFY_TOKEN=nexus_webhook_verify_2024
   - J-7 : `Reminder2_sent`/`Pending` → `Reminder3_sent`
   - J-3 : `Reminder3_sent`/`Pending` → `To_be_called` (pas de message)
 
-### Statuts NON traités par le cron
+### 2. Follow-up "Assistance RDV" (api/cron/send-followups.ts) - NEW
+
+- **Horaire** : Toutes les heures de 9h à 18h Paris (`0 8-17 * * *`)
+- **Template** : `assistance_rdv` (Quick Reply buttons)
+- **Message** : "Souhaitez-vous qu'on vous appelle pour vous assister dans la prise de votre prochain rendez-vous ?"
+
+**Conditions d'envoi** :
+1. Statut = `Reminder1_sent`
+2. Premier message lu ("read") par WhatsApp
+3. Envoyé depuis 2h+ sans réponse
+4. Heure actuelle entre 9h et 19h (Paris)
+5. `follow_up_sent = FALSE`
+
+**Boutons Quick Reply** :
+- "Oui, appelez-moi" → `To_be_called` (sort du workflow)
+- "Non merci" → `Onhold` (agent décide)
+
+### Statuts NON traités par les crons
 - `Onhold` : Client a répondu, attente décision agent
 - `To_be_called` : Déjà marqué pour appel
 - `Appointment_confirmed`, `Closed`, `Completed` : Finaux
@@ -360,10 +390,11 @@ WHATSAPP_VERIFY_TOKEN=nexus_webhook_verify_2024
 4. **Matching centres** = Par similarité de nom (centerMatcher.ts)
 5. **Normalisation téléphone** = Format E.164 (+33..., +212...)
 6. **Boutons URL/Phone** = Pas de tracking possible (pas de callback Meta)
-7. **Quick Reply buttons** = Seuls boutons trackables via webhook
+7. **Quick Reply buttons** = Trackables via webhook (utilisé pour follow-up)
 8. **Rate limiting** = 1.5s entre chaque message, pause 30s si détecté
 9. **Statuts WhatsApp** = TOUJOURS loggés dans whatsapp_status_log
 10. **Réconciliation** = Automatique après chaque insertion de message
+11. **Follow-up "read"** = Envoyé 2h après lecture si pas de réponse (9h-19h)
 
 ---
 
@@ -414,6 +445,13 @@ const supabase = createClient(
 ---
 
 ## 📝 Changelog Notable
+
+### v2.2.0 (2026-01-23)
+- **Follow-up "Assistance RDV"** : Message de suivi envoyé 2h après lecture
+- **Quick Reply buttons** : "Oui, appelez-moi" / "Non merci"
+- **Nouveau cron** : `send-followups.ts` (toutes les heures 9h-18h)
+- **Champs reminders** : `follow_up_sent`, `follow_up_sent_at`
+- **Webhook** : Gestion des réponses Quick Reply → To_be_called ou Onhold
 
 ### v2.1.0 (2026-01-23)
 - **whatsapp_status_log** : Nouvelle table pour logger tous les statuts

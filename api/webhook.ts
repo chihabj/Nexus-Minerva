@@ -258,7 +258,105 @@ async function handleClientResponse(phone: string, content: string, clientId: st
     return;
   }
   
-  // ANY response puts the reminder on hold
+  // Check for Quick Reply responses from "assistance_rdv" follow-up template
+  // These buttons trigger immediate actions and bypass normal flow
+  const contentLower = content.toLowerCase().trim();
+  const isYesCallMe = 
+    contentLower.includes('oui') && contentLower.includes('appel') ||
+    contentLower === 'oui, appelez-moi' ||
+    contentLower === 'oui appelez-moi';
+  const isNoThanks = 
+    contentLower === 'non merci' ||
+    contentLower === 'non, merci' ||
+    (contentLower.includes('non') && contentLower.includes('merci'));
+
+  if (isYesCallMe) {
+    // Client wants a call -> Set to To_be_called and EXIT workflow
+    console.log('📞 Client requested a call (Quick Reply: Oui, appelez-moi)');
+    
+    const { data: updatedReminders, error } = await supabase
+      .from('reminders')
+      .update({ 
+        status: 'To_be_called',
+        call_required: true,
+        response_received_at: new Date().toISOString(),
+        message: 'Le client a demandé à être appelé suite au message de suivi',
+      })
+      .eq('client_id', actualClientId)
+      .in('status', ['New', 'Pending', 'Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent'])
+      .select();
+    
+    if (error) {
+      console.error('Error updating reminder to To_be_called:', error);
+    } else if (updatedReminders && updatedReminders.length > 0) {
+      console.log(`✅ Set ${updatedReminders.length} reminder(s) to To_be_called`);
+      
+      // Log in reminder_logs
+      for (const reminder of updatedReminders) {
+        await supabase.from('reminder_logs').insert({
+          reminder_id: reminder.id,
+          action_type: 'whatsapp',
+          status: 'delivered',
+          response_received: true,
+          response_text: content,
+        });
+      }
+    }
+    
+    // Notify agents - urgent call requested
+    await createNotificationForAdmins(
+      '📞 Appel demandé par le client',
+      `Le client souhaite être appelé pour l'aider à prendre rendez-vous. Action requise !`,
+      'action_required',
+      `/inbox?phone=${encodeURIComponent(cleanPhone)}`
+    );
+    
+    return; // Exit - don't process as normal response
+  }
+
+  if (isNoThanks) {
+    // Client declined call -> Set to Onhold (agent decides next step)
+    console.log('👋 Client declined call (Quick Reply: Non merci)');
+    
+    const { data: updatedReminders, error } = await supabase
+      .from('reminders')
+      .update({ 
+        status: 'Onhold',
+        response_received_at: new Date().toISOString(),
+        message: 'Le client a décliné l\'appel (Non merci)',
+      })
+      .eq('client_id', actualClientId)
+      .in('status', ['New', 'Pending', 'Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent', 'To_be_called'])
+      .select();
+    
+    if (error) {
+      console.error('Error updating reminder to Onhold:', error);
+    } else if (updatedReminders && updatedReminders.length > 0) {
+      console.log(`✅ Set ${updatedReminders.length} reminder(s) to Onhold (declined call)`);
+      
+      for (const reminder of updatedReminders) {
+        await supabase.from('reminder_logs').insert({
+          reminder_id: reminder.id,
+          action_type: 'whatsapp',
+          status: 'delivered',
+          response_received: true,
+          response_text: content,
+        });
+      }
+    }
+    
+    // Notify agents
+    await createNotificationForAdmins(
+      '👋 Client a décliné l\'appel',
+      `Le client a répondu "Non merci" à notre proposition d'appel. Le dossier est en attente.`,
+      'info',
+      `/inbox?phone=${encodeURIComponent(cleanPhone)}`
+    );
+    
+    return; // Exit - don't process as normal response
+  }
+
+  // ANY other response puts the reminder on hold
   // Statuses that should be put on hold (active workflow statuses)
   const activeStatuses = ['New', 'Pending', 'Reminder1_sent', 'Reminder2_sent', 'Reminder3_sent', 'To_be_called'];
   
