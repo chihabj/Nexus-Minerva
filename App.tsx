@@ -121,6 +121,13 @@ const Sidebar = () => {
             <span className="text-sm">Settings</span>
           </Link>
         )}
+        
+        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <Link to="/documentation" className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isActive('/documentation') ? 'bg-primary/10 text-primary font-semibold' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+            <span className="material-symbols-outlined">menu_book</span>
+            <span className="text-sm">Documentation</span>
+          </Link>
+        </div>
       </nav>
 
       <div className="p-4 border-t border-slate-100 dark:border-slate-800">

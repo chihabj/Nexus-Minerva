@@ -447,6 +447,12 @@ const supabase = createClient(
 
 ## 📝 Changelog Notable
 
+### v2.3.0 (2026-01-23)
+- **Documentation in-app** : Page `/documentation` avec 8 onglets (Prise en main, Dashboard, Todo List, Messages, Import, Clients & Centres, Workflow, FAQ)
+- **Sidebar** : Lien Documentation ajouté en bas de la navigation
+- **README.md** : Réécriture complète pour GitHub (structure, setup, workflow, tables DB, rôles, déploiement)
+- **Cron follow-up** : Ajusté Lun-Ven 9h-17h Paris (`0 7-16 * * 1-5`), pas d'envoi le weekend
+
 ### v2.2.0 (2026-01-23)
 - **Follow-up "Assistance RDV"** : Message de suivi envoyé 2h après lecture
 - **Quick Reply buttons** : "Oui, appelez-moi" / "Non merci"
