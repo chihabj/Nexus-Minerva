@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/cron/send-followups",
-      "schedule": "0 8-17 * * *"
+      "schedule": "0 7-16 * * 1-5"
     }
   ]
 }

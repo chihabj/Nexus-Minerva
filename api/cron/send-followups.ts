@@ -35,9 +35,10 @@ const FOLLOWUP_TEMPLATE_NAME = 'assistance_rdv';
 // Minimum hours since first message was sent
 const MIN_HOURS_SINCE_SENT = 2;
 
-// Business hours (Paris time)
+// Business hours (Paris time) - Mon-Fri 9h-17h only
+// Weekend reads are queued and sent Monday morning automatically
 const BUSINESS_HOUR_START = 9;
-const BUSINESS_HOUR_END = 19;
+const BUSINESS_HOUR_END = 17;
 
 interface FollowUpCandidate {
   reminder_id: string;

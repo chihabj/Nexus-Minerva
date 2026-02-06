@@ -53,7 +53,7 @@
 /api/                    # Serverless functions Vercel
   webhook.ts             # Webhook WhatsApp (réception messages + statuts)
   cron/send-reminders.ts # Cron quotidien (10h30) - relances auto
-  cron/send-followups.ts # Cron horaire (9h-18h) - follow-up "Vous appeler?"
+  cron/send-followups.ts # Cron horaire Lun-Ven 9h-17h - follow-up "Vous appeler?"
 
 /views/                  # Pages React
   Dashboard.tsx          # KPIs + Actions urgentes + Pipeline 30j
@@ -360,7 +360,8 @@ WHATSAPP_VERIFY_TOKEN=nexus_webhook_verify_2024
 
 ### 2. Follow-up "Assistance RDV" (api/cron/send-followups.ts) - NEW
 
-- **Horaire** : Toutes les heures de 9h à 18h Paris (`0 8-17 * * *`)
+- **Horaire** : Toutes les heures Lun-Ven 9h à 17h Paris (`0 7-16 * * 1-5`)
+- **Weekend** : Pas d'envoi. Les messages lus samedi/dimanche sont envoyés lundi matin automatiquement
 - **Template** : `assistance_rdv` (Quick Reply buttons)
 - **Message** : "Souhaitez-vous qu'on vous appelle pour vous assister dans la prise de votre prochain rendez-vous ?"
 
@@ -449,7 +450,7 @@ const supabase = createClient(
 ### v2.2.0 (2026-01-23)
 - **Follow-up "Assistance RDV"** : Message de suivi envoyé 2h après lecture
 - **Quick Reply buttons** : "Oui, appelez-moi" / "Non merci"
-- **Nouveau cron** : `send-followups.ts` (toutes les heures 9h-18h)
+- **Nouveau cron** : `send-followups.ts` (Lun-Ven 9h-17h, weekend skip → envoi lundi)
 - **Champs reminders** : `follow_up_sent`, `follow_up_sent_at`
 - **Webhook** : Gestion des réponses Quick Reply → To_be_called ou Onhold
 
