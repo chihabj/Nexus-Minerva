@@ -116,8 +116,6 @@ export default function Centers() {
 
   // Stats
   const connectedCount = centers.filter(c => c.status === 'Connected').length;
-  const totalStaff = centers.reduce((sum, c) => sum + (c.staff_count || 0), 0);
-
   return (
     <div className="p-8 h-full overflow-y-auto custom-scrollbar">
       <div className="max-w-7xl mx-auto space-y-8">
@@ -138,7 +136,7 @@ export default function Centers() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white dark:bg-surface-dark rounded-xl p-4 border border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-lg bg-primary/10">
@@ -169,17 +167,6 @@ export default function Centers() {
               <div>
                 <p className="text-xs text-slate-500">Régions</p>
                 <p className="text-2xl font-bold text-blue-600">{regions.length}</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white dark:bg-surface-dark rounded-xl p-4 border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-lg bg-violet-100 dark:bg-violet-900/30">
-                <span className="material-symbols-outlined text-violet-600">groups</span>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">Personnel Total</p>
-                <p className="text-2xl font-bold text-violet-600">{totalStaff}</p>
               </div>
             </div>
           </div>
@@ -288,7 +275,6 @@ export default function Centers() {
                     <th className="px-6 py-4">Adresse</th>
                     <th className="px-6 py-4">Région</th>
                     <th className="px-6 py-4">Statut</th>
-                    <th className="px-6 py-4">Personnel</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -317,12 +303,6 @@ export default function Centers() {
                       </td>
                       <td className="px-6 py-4">
                         {getStatusBadge(center.status)}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className="material-symbols-outlined text-slate-400 text-[18px]">group</span>
-                          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{center.staff_count}</span>
-                        </div>
                       </td>
                     </tr>
                   ))}

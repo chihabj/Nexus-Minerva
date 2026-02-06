@@ -284,16 +284,16 @@ function TodoListContent() {
       <Card title="Types de tâches" icon="task" accent="blue">
         <div className="space-y-3">
           <div>
-            <StatusBadge status="En attente" label="Le client a répondu ou le dossier nécessite une action de votre part" color="bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300" />
+            <StatusBadge status="⏳ En attente" label="En attente d'envoi de relance WhatsApp ou d'une réponse client" color="bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" />
           </div>
           <div>
-            <StatusBadge status="À appeler" label="Le client doit être contacté par téléphone (passage automatique à J-3 de l'échéance)" color="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" />
+            <StatusBadge status="⏸️ À traiter" label="Le client a répondu, décidez de la suite à donner" color="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" />
           </div>
           <div>
-            <StatusBadge status="Pending" label="En attente d'envoi de relance WhatsApp ou d'une réponse client" color="bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-300" />
+            <StatusBadge status="📞 À appeler" label="Le client doit être contacté par téléphone (passage automatique à J-3 de l'échéance)" color="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" />
           </div>
           <div>
-            <StatusBadge status="À contacter" label="Le client a demandé à être rappelé" color="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" />
+            <StatusBadge status="🔔 À recontacter" label="Le client a demandé à être rappelé" color="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" />
           </div>
         </div>
       </Card>
@@ -309,12 +309,14 @@ function TodoListContent() {
 
       <Card title="Comment résoudre une tâche" icon="done_all" accent="purple">
         <div className="space-y-2">
-          <p>Pour changer le statut d'un dossier, allez dans la conversation du client (onglet Messages) et utilisez le sélecteur de statut. Les options sont :</p>
+          <p>Chaque tâche affiche des boutons d'action rapide pour changer le statut du dossier :</p>
           <ul className="list-disc list-inside space-y-1 ml-2">
-            <li><strong>RDV confirmé</strong> - Le client a confirmé son rendez-vous</li>
-            <li><strong>À contacter</strong> - Le client souhaite être rappelé plus tard</li>
-            <li><strong>Clôturé</strong> - Le dossier est terminé (client n'a plus le véhicule, a pris RDV seul, etc.)</li>
+            <li><strong>RDV Confirmé</strong> - Le client a confirmé son rendez-vous</li>
+            <li><strong>À recontacter</strong> - Le client souhaite être rappelé plus tard</li>
+            <li><strong>En attente</strong> - Vous attendez une réponse du client sans relancer</li>
+            <li><strong>Fermé</strong> - Le dossier est terminé (client n'a plus le véhicule, a pris RDV seul, etc.)</li>
           </ul>
+          <p className="text-xs text-slate-500 mt-1">Vous pouvez aussi changer le statut depuis la fenêtre de conversation dans l'onglet Messages.</p>
         </div>
       </Card>
     </div>
@@ -342,19 +344,23 @@ function MessagesContent() {
           </div>
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-base text-orange-500">priority_high</span>
-            <strong>À traiter</strong> - Conversations nécessitant votre action (Onhold, À appeler, À contacter)
+            <strong>À traiter</strong> - Nécessitant votre action (en attente d'action, à appeler, à recontacter)
           </div>
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-base text-blue-500">pending</span>
-            <strong>En attente</strong> - En attente de réponse du client
+            <span className="material-symbols-outlined text-base text-blue-500">schedule</span>
+            <strong>En cours</strong> - Relances en cours dans le workflow automatique (New, Reminder 1/2/3 envoyé)
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-base text-amber-500">hourglass_empty</span>
+            <strong>En attente</strong> - En attente de réponse du client (Pending)
           </div>
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-base text-green-500">check_circle</span>
-            <strong>Résolus</strong> - Dossiers terminés
+            <strong>Résolus</strong> - RDV confirmé, terminé ou clôturé
           </div>
           <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-base text-slate-500">schedule_send</span>
-            <strong>Relances auto</strong> - Relances envoyées sans réponse du client
+            <span className="material-symbols-outlined text-base text-slate-500">send</span>
+            <strong>Relances automatiques</strong> - Relances envoyées sans interaction du client
           </div>
         </div>
       </Card>
