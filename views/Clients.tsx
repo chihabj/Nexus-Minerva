@@ -1,15 +1,24 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
+import { useAuth } from '../contexts/AuthContext';
 import { formatPhoneDisplay } from '../utils/dataNormalizer';
 import type { Client } from '../types';
 
 export default function Clients() {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Bulk delete state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState({ current: 0, total: 0 });
+  const canDelete = hasPermission(['superadmin', 'admin']);
 
   // Fetch clients from Supabase - OPTIMIZED
   useEffect(() => {
@@ -101,6 +110,99 @@ export default function Clients() {
     return formatPhoneDisplay(phone, 'FR') || phone;
   };
 
+  // Selection helpers
+  const toggleSelect = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds(prev =>
+      prev.size === filteredClients.length
+        ? new Set()
+        : new Set(filteredClients.map(c => c.id))
+    );
+  }, [filteredClients]);
+
+  // Bulk delete handler — cascade deletes all related data
+  const handleBulkDelete = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setDeleting(true);
+    setDeleteProgress({ current: 0, total: ids.length });
+
+    try {
+      // Process in batches of 50 to stay within Supabase query limits
+      const batchSize = 50;
+      for (let i = 0; i < ids.length; i += batchSize) {
+        const batch = ids.slice(i, i + batchSize);
+        setDeleteProgress({ current: i, total: ids.length });
+
+        // 1. Get conversation IDs for this batch
+        const { data: convs } = await supabase
+          .from('conversations')
+          .select('id')
+          .in('client_id', batch);
+        const convIds = convs?.map(c => c.id) || [];
+
+        if (convIds.length > 0) {
+          // 1a. Get message IDs
+          const { data: msgs } = await supabase
+            .from('messages')
+            .select('id')
+            .in('conversation_id', convIds);
+          const msgIds = msgs?.map(m => m.id) || [];
+
+          // 1b. Delete whatsapp_status_log
+          if (msgIds.length > 0) {
+            await supabase.from('whatsapp_status_log').delete().in('message_id', msgIds);
+          }
+
+          // 2. Delete messages
+          await supabase.from('messages').delete().in('conversation_id', convIds);
+        }
+
+        // 3. Get reminder IDs
+        const { data: rems } = await supabase
+          .from('reminders')
+          .select('id')
+          .in('client_id', batch);
+        const remIds = rems?.map(r => r.id) || [];
+
+        if (remIds.length > 0) {
+          await supabase.from('reminder_logs').delete().in('reminder_id', remIds);
+        }
+
+        // 4. Delete client_notes
+        await supabase.from('client_notes').delete().in('client_id', batch);
+
+        // 5. Delete conversations
+        await supabase.from('conversations').delete().in('client_id', batch);
+
+        // 6. Delete reminders
+        await supabase.from('reminders').delete().in('client_id', batch);
+
+        // 7. Delete clients
+        await supabase.from('clients').delete().in('id', batch);
+      }
+
+      // Update local state
+      setClients(prev => prev.filter(c => !selectedIds.has(c.id)));
+      setSelectedIds(new Set());
+      setShowDeleteConfirm(false);
+    } catch (err) {
+      console.error('Bulk delete error:', err);
+      alert('Erreur lors de la suppression. Certains clients n\'ont peut-être pas été supprimés.');
+    } finally {
+      setDeleting(false);
+      setDeleteProgress({ current: 0, total: 0 });
+    }
+  }, [selectedIds]);
+
   return (
     <div className="h-full flex flex-col bg-background-light dark:bg-background-dark">
       {/* Header */}
@@ -114,6 +216,23 @@ export default function Clients() {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              {canDelete && selectedIds.size > 0 && (
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-medium transition-colors"
+                >
+                  <span className="material-symbols-outlined text-lg">delete</span>
+                  Supprimer ({selectedIds.size})
+                </button>
+              )}
+              {canDelete && selectedIds.size > 0 && (
+                <button
+                  onClick={() => setSelectedIds(new Set())}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-sm font-medium transition-colors"
+                >
+                  Désélectionner
+                </button>
+              )}
               <span className="text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
                 {clients.length} enregistrements
               </span>
@@ -206,6 +325,16 @@ export default function Clients() {
                 <table className="w-full text-left">
                   <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800/80 backdrop-blur-sm z-10">
                     <tr className="border-b border-slate-200 dark:border-slate-700">
+                      {canDelete && (
+                        <th className="pl-6 pr-2 py-4 w-10">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.size === filteredClients.length && filteredClients.length > 0}
+                            onChange={toggleSelectAll}
+                            className="size-4 rounded border-slate-300 text-primary focus:ring-primary/20 cursor-pointer"
+                          />
+                        </th>
+                      )}
                       <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">
                         Client
                       </th>
@@ -228,8 +357,19 @@ export default function Clients() {
                       <tr 
                         key={client.id} 
                         onClick={() => navigate(`/clients/${client.id}`)}
-                        className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors cursor-pointer"
+                        className={`hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors cursor-pointer ${selectedIds.has(client.id) ? 'bg-red-50/50 dark:bg-red-900/10' : ''}`}
                       >
+                        {canDelete && (
+                          <td className="pl-6 pr-2 py-4 w-10">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(client.id)}
+                              onChange={() => {}}
+                              onClick={(e) => toggleSelect(client.id, e)}
+                              className="size-4 rounded border-slate-300 text-primary focus:ring-primary/20 cursor-pointer"
+                            />
+                          </td>
+                        )}
                         {/* Client Info */}
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
@@ -316,6 +456,57 @@ export default function Clients() {
           </div>
         </div>
       </div>
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="size-12 rounded-full bg-red-100 flex items-center justify-center">
+                <span className="material-symbols-outlined text-red-600 text-2xl">warning</span>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Supprimer {selectedIds.size} client{selectedIds.size > 1 ? 's' : ''} ?</h3>
+                <p className="text-sm text-slate-500">Cette action est irréversible</p>
+              </div>
+            </div>
+            <p className="text-slate-600 dark:text-slate-400 mb-2">
+              Les clients sélectionnés et toutes leurs données associées seront définitivement supprimés :
+            </p>
+            <ul className="text-sm text-slate-500 mb-6 space-y-1 ml-4 list-disc">
+              <li>Relances et historique de workflow</li>
+              <li>Conversations et messages WhatsApp</li>
+              <li>Notes internes</li>
+            </ul>
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {deleting ? (
+                  <>
+                    <div className="size-4 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
+                    Suppression... {deleteProgress.current}/{deleteProgress.total}
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-lg">delete_forever</span>
+                    Confirmer la suppression
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

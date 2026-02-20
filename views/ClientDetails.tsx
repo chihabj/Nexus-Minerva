@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabaseClient';
+import { useAuth } from '../contexts/AuthContext';
 import type { Client, Reminder, ClientNote, ReminderStatus, NoteType } from '../types';
 
 interface TimelineItem {
@@ -16,6 +17,7 @@ interface TimelineItem {
 export default function ClientDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   
   const [client, setClient] = useState<Client | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -30,6 +32,11 @@ export default function ClientDetails() {
   
   // Status update state
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+
+  // Delete state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const canDelete = hasPermission(['superadmin', 'admin']);
 
   // Fetch all client data
   const fetchClientData = useCallback(async () => {
@@ -180,6 +187,75 @@ export default function ClientDetails() {
   const openWhatsApp = () => {
     if (!client?.phone) return;
     navigate(`/inbox?phone=${encodeURIComponent(client.phone)}`);
+  };
+
+  // Delete client and all related data
+  const handleDeleteClient = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      // 1. Delete whatsapp_status_log via messages → conversations
+      const { data: convIds } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('client_id', id);
+
+      if (convIds && convIds.length > 0) {
+        const conversationIds = convIds.map(c => c.id);
+
+        const { data: msgIds } = await supabase
+          .from('messages')
+          .select('id')
+          .in('conversation_id', conversationIds);
+
+        if (msgIds && msgIds.length > 0) {
+          await supabase
+            .from('whatsapp_status_log')
+            .delete()
+            .in('message_id', msgIds.map(m => m.id));
+        }
+
+        // 2. Delete messages
+        await supabase
+          .from('messages')
+          .delete()
+          .in('conversation_id', conversationIds);
+      }
+
+      // 3. Delete reminder_logs via reminders
+      const { data: remIds } = await supabase
+        .from('reminders')
+        .select('id')
+        .eq('client_id', id);
+
+      if (remIds && remIds.length > 0) {
+        await supabase
+          .from('reminder_logs')
+          .delete()
+          .in('reminder_id', remIds.map(r => r.id));
+      }
+
+      // 4. Delete client_notes
+      await supabase.from('client_notes').delete().eq('client_id', id);
+
+      // 5. Delete conversations
+      await supabase.from('conversations').delete().eq('client_id', id);
+
+      // 6. Delete reminders
+      await supabase.from('reminders').delete().eq('client_id', id);
+
+      // 7. Delete client
+      const { error: deleteError } = await supabase.from('clients').delete().eq('id', id);
+      if (deleteError) throw deleteError;
+
+      navigate('/clients');
+    } catch (err) {
+      console.error('Error deleting client:', err);
+      alert('Erreur lors de la suppression du client');
+    } finally {
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
   };
 
   // Build timeline from reminders and notes
@@ -341,13 +417,71 @@ export default function ClientDetails() {
                   Appeler
                 </a>
               )}
-              <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
-                <span className="material-symbols-outlined">more_vert</span>
-              </button>
+              {canDelete && (
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl font-medium transition-colors"
+                  title="Supprimer ce client"
+                >
+                  <span className="material-symbols-outlined text-xl">delete</span>
+                  Supprimer
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="size-12 rounded-full bg-red-100 flex items-center justify-center">
+                <span className="material-symbols-outlined text-red-600 text-2xl">warning</span>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Supprimer ce client ?</h3>
+                <p className="text-sm text-slate-500">Cette action est irréversible</p>
+              </div>
+            </div>
+            <p className="text-slate-600 dark:text-slate-400 mb-2">
+              Le client <strong>{client?.name || 'Sans nom'}</strong> et toutes ses données associées seront supprimés :
+            </p>
+            <ul className="text-sm text-slate-500 mb-6 space-y-1 ml-4 list-disc">
+              <li>Relances et historique de workflow</li>
+              <li>Conversations et messages WhatsApp</li>
+              <li>Notes internes</li>
+            </ul>
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-medium transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleDeleteClient}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {deleting ? (
+                  <>
+                    <div className="size-4 border-2 border-white border-t-transparent animate-spin rounded-full"></div>
+                    Suppression...
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-lg">delete_forever</span>
+                    Confirmer la suppression
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="max-w-6xl mx-auto p-8">
