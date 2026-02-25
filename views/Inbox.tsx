@@ -338,41 +338,47 @@ export default function Inbox() {
     fetchTemplates();
   }, [fetchConversations, fetchTemplates]);
 
-  // Handle URL param to auto-select conversation by phone
+  // Handle URL params to auto-select conversation by client_id or phone
   useEffect(() => {
+    if (conversations.length === 0 || selectedConversation) return;
+
+    const clientIdParam = searchParams.get('client_id');
     const phoneParam = searchParams.get('phone');
-    if (phoneParam && conversations.length > 0 && !selectedConversation) {
-      // Normalize phone for comparison
+
+    let matchingConv: Conversation | undefined;
+
+    if (clientIdParam) {
+      matchingConv = conversations.find(c => c.client_id === clientIdParam);
+    } else if (phoneParam) {
       const normalizedParam = phoneParam.replace(/[^0-9]/g, '');
-      const matchingConv = conversations.find(c => {
+      matchingConv = conversations.find(c => {
         const convPhone = c.client_phone.replace(/[^0-9]/g, '');
         return convPhone === normalizedParam || convPhone.endsWith(normalizedParam) || normalizedParam.endsWith(convPhone);
       });
-      
-      if (matchingConv) {
-        setSelectedConversation(matchingConv);
-        // Clear the URL param after selection
-        setSearchParams({});
-      } else {
-        // Store for later when conversations load
-        setAutoSelectPending(normalizedParam);
-      }
+    }
+
+    if (matchingConv) {
+      setSelectedConversation(matchingConv);
+      setSearchParams({});
+    } else if (clientIdParam || phoneParam) {
+      setAutoSelectPending(clientIdParam || phoneParam!.replace(/[^0-9]/g, ''));
     }
   }, [searchParams, conversations, selectedConversation, setSearchParams]);
 
   // Handle pending auto-select after conversations load
   useEffect(() => {
-    if (autoSelectPending && conversations.length > 0) {
-      const matchingConv = conversations.find(c => {
-        const convPhone = c.client_phone.replace(/[^0-9]/g, '');
-        return convPhone === autoSelectPending || convPhone.endsWith(autoSelectPending) || autoSelectPending.endsWith(convPhone);
-      });
-      
-      if (matchingConv) {
-        setSelectedConversation(matchingConv);
-        setAutoSelectPending(null);
-        setSearchParams({});
-      }
+    if (!autoSelectPending || conversations.length === 0) return;
+
+    const matchingConv = conversations.find(c => {
+      if (c.client_id === autoSelectPending) return true;
+      const convPhone = c.client_phone.replace(/[^0-9]/g, '');
+      return convPhone === autoSelectPending || convPhone.endsWith(autoSelectPending) || autoSelectPending.endsWith(convPhone);
+    });
+    
+    if (matchingConv) {
+      setSelectedConversation(matchingConv);
+      setAutoSelectPending(null);
+      setSearchParams({});
     }
   }, [autoSelectPending, conversations, setSearchParams]);
 

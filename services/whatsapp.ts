@@ -252,7 +252,7 @@ export async function sendRappelVisiteTechnique({
     // Bouton "Nous appeler" (Téléphone)
     {
       type: 'button',
-      sub_type: 'phone_number',
+      sub_type: 'VOICE_CALL',
       index: 1,
       parameters: [
         {

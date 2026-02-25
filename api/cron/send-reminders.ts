@@ -221,7 +221,7 @@ async function sendWhatsAppTemplate(
               },
               {
                 type: 'button',
-                sub_type: 'phone_number',
+                sub_type: 'VOICE_CALL',
                 index: 1,
                 parameters: [{ type: 'text', text: params.numeroAppelCentre?.replace(/[^\d]/g, '') || '' }],
               },
@@ -518,13 +518,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log('\n✅ Cron job completed:', results);
 
-    // Create summary notification if there were actions
-    const totalActions = results.whatsapp_sent + results.calls_required;
+    // Create summary notification if there were any actions or failures
+    const totalActions = results.whatsapp_sent + results.calls_required + results.whatsapp_failed;
     if (totalActions > 0) {
+      const parts: string[] = [];
+      if (results.whatsapp_sent > 0) parts.push(`${results.whatsapp_sent} WhatsApp envoyés`);
+      if (results.calls_required > 0) parts.push(`${results.calls_required} clients à appeler`);
+      if (results.whatsapp_failed > 0) parts.push(`⚠️ ${results.whatsapp_failed} échecs d'envoi`);
+
+      const hasFailures = results.whatsapp_failed > 0;
+      const notificationType = hasFailures ? 'warning' 
+        : results.calls_required > 0 ? 'action_required' 
+        : 'info';
+
       await createNotification(
-        '📊 Rapport des rappels automatiques',
-        `${results.whatsapp_sent} WhatsApp envoyés, ${results.calls_required} clients à appeler`,
-        results.calls_required > 0 ? 'action_required' : 'info',
+        hasFailures ? '⚠️ Rappels automatiques - Échecs détectés' : '📊 Rapport des rappels automatiques',
+        parts.join(', '),
+        notificationType,
         '/todo'
       );
     }
