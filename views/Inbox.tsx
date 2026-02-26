@@ -73,7 +73,7 @@ const FILTER_CATEGORIES: Record<FilterCategory, {
 };
 
 export default function Inbox() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -94,21 +94,7 @@ export default function Inbox() {
   const [conversationReminders, setConversationReminders] = useState<Record<string, Reminder>>({});
   const [conversationsWithInboundMessages, setConversationsWithInboundMessages] = useState<Set<string>>(new Set());
 
-  // Capture URL params at mount time (ref survives re-renders without triggering them)
-  const pendingAutoSelect = useRef<{ clientId: string | null; phone: string | null } | null>(null);
   const autoSelectDone = useRef(false);
-
-  // Read URL params once at mount
-  useEffect(() => {
-    const clientId = searchParams.get('client_id');
-    const phone = searchParams.get('phone');
-    if (clientId || phone) {
-      pendingAutoSelect.current = { clientId, phone };
-      // Clear URL params immediately to avoid re-triggering
-      setSearchParams({}, { replace: true });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -355,17 +341,18 @@ export default function Inbox() {
 
   // Auto-select conversation from URL params when conversations are loaded
   useEffect(() => {
-    if (autoSelectDone.current || !pendingAutoSelect.current || conversations.length === 0) return;
+    if (autoSelectDone.current || conversations.length === 0) return;
 
-    const { clientId, phone } = pendingAutoSelect.current;
+    const clientId = searchParams.get('client_id');
+    const phone = searchParams.get('phone');
+    if (!clientId && !phone) return;
+
     let match: Conversation | undefined;
 
-    // Try client_id first
     if (clientId) {
       match = conversations.find(c => c.client_id === clientId);
     }
 
-    // Fallback to phone matching
     if (!match && phone) {
       const normalizedPhone = phone.replace(/[^0-9]/g, '');
       match = conversations.find(c => {
@@ -376,10 +363,9 @@ export default function Inbox() {
 
     if (match) {
       autoSelectDone.current = true;
-      pendingAutoSelect.current = null;
       setSelectedConversation(match);
     }
-  }, [conversations]);
+  }, [conversations, searchParams]);
 
   // Load reminders for all conversations when they change
   useEffect(() => {
