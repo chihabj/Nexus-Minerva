@@ -93,7 +93,22 @@ export default function Inbox() {
   const [showQuickReplies, setShowQuickReplies] = useState(false);
   const [conversationReminders, setConversationReminders] = useState<Record<string, Reminder>>({});
   const [conversationsWithInboundMessages, setConversationsWithInboundMessages] = useState<Set<string>>(new Set());
-  const [autoSelectPending, setAutoSelectPending] = useState<string | null>(null);
+
+  // Capture URL params at mount time (ref survives re-renders without triggering them)
+  const pendingAutoSelect = useRef<{ clientId: string | null; phone: string | null } | null>(null);
+  const autoSelectDone = useRef(false);
+
+  // Read URL params once at mount
+  useEffect(() => {
+    const clientId = searchParams.get('client_id');
+    const phone = searchParams.get('phone');
+    if (clientId || phone) {
+      pendingAutoSelect.current = { clientId, phone };
+      // Clear URL params immediately to avoid re-triggering
+      setSearchParams({}, { replace: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -338,71 +353,33 @@ export default function Inbox() {
     fetchTemplates();
   }, [fetchConversations, fetchTemplates]);
 
-  // Find a conversation matching client_id and/or phone
-  const findMatchingConversation = useCallback((clientId: string | null, phone: string | null): Conversation | undefined => {
-    if (conversations.length === 0) return undefined;
+  // Auto-select conversation from URL params when conversations are loaded
+  useEffect(() => {
+    if (autoSelectDone.current || !pendingAutoSelect.current || conversations.length === 0) return;
 
-    // Try client_id first (exact match)
+    const { clientId, phone } = pendingAutoSelect.current;
+    let match: Conversation | undefined;
+
+    // Try client_id first
     if (clientId) {
-      const match = conversations.find(c => c.client_id === clientId);
-      if (match) return match;
+      match = conversations.find(c => c.client_id === clientId);
     }
 
     // Fallback to phone matching
-    if (phone) {
+    if (!match && phone) {
       const normalizedPhone = phone.replace(/[^0-9]/g, '');
-      return conversations.find(c => {
+      match = conversations.find(c => {
         const convPhone = c.client_phone.replace(/[^0-9]/g, '');
         return convPhone === normalizedPhone || convPhone.endsWith(normalizedPhone) || normalizedPhone.endsWith(convPhone);
       });
     }
 
-    return undefined;
+    if (match) {
+      autoSelectDone.current = true;
+      pendingAutoSelect.current = null;
+      setSelectedConversation(match);
+    }
   }, [conversations]);
-
-  // Handle URL params to auto-select conversation
-  useEffect(() => {
-    if (conversations.length === 0 || selectedConversation) return;
-
-    const clientIdParam = searchParams.get('client_id');
-    const phoneParam = searchParams.get('phone');
-    if (!clientIdParam && !phoneParam) return;
-
-    const matchingConv = findMatchingConversation(clientIdParam, phoneParam);
-
-    if (matchingConv) {
-      setSelectedConversation(matchingConv);
-      setSearchParams({}, { replace: true });
-      setAutoSelectPending(null);
-    } else {
-      // Store params for retry when conversations finish loading
-      setAutoSelectPending(JSON.stringify({ clientId: clientIdParam, phone: phoneParam }));
-    }
-  }, [searchParams, conversations, selectedConversation, findMatchingConversation, setSearchParams]);
-
-  // Retry auto-select when conversations update
-  useEffect(() => {
-    if (!autoSelectPending || conversations.length === 0) return;
-
-    let clientId: string | null = null;
-    let phone: string | null = null;
-    try {
-      const parsed = JSON.parse(autoSelectPending);
-      clientId = parsed.clientId;
-      phone = parsed.phone;
-    } catch {
-      // Legacy format (plain string) — treat as phone
-      phone = autoSelectPending;
-    }
-
-    const matchingConv = findMatchingConversation(clientId, phone);
-
-    if (matchingConv) {
-      setSelectedConversation(matchingConv);
-      setAutoSelectPending(null);
-      setSearchParams({}, { replace: true });
-    }
-  }, [autoSelectPending, conversations, findMatchingConversation, setSearchParams]);
 
   // Load reminders for all conversations when they change
   useEffect(() => {
