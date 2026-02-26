@@ -426,7 +426,7 @@ export default function TodoList() {
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   {reminder.client?.phone ? (
                     <button
-                      onClick={() => navigate(`/inbox?client_id=${encodeURIComponent(reminder.client_id)}`)}
+                      onClick={() => navigate(`/inbox?client_id=${encodeURIComponent(reminder.client_id)}&phone=${encodeURIComponent(reminder.client.phone)}`)}
                       className="px-3 py-1.5 rounded-lg bg-green-100 text-green-700 text-xs font-medium hover:bg-green-200 transition-colors"
                     >
                       💬 Conversation

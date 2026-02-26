@@ -338,49 +338,71 @@ export default function Inbox() {
     fetchTemplates();
   }, [fetchConversations, fetchTemplates]);
 
-  // Handle URL params to auto-select conversation by client_id or phone
+  // Find a conversation matching client_id and/or phone
+  const findMatchingConversation = useCallback((clientId: string | null, phone: string | null): Conversation | undefined => {
+    if (conversations.length === 0) return undefined;
+
+    // Try client_id first (exact match)
+    if (clientId) {
+      const match = conversations.find(c => c.client_id === clientId);
+      if (match) return match;
+    }
+
+    // Fallback to phone matching
+    if (phone) {
+      const normalizedPhone = phone.replace(/[^0-9]/g, '');
+      return conversations.find(c => {
+        const convPhone = c.client_phone.replace(/[^0-9]/g, '');
+        return convPhone === normalizedPhone || convPhone.endsWith(normalizedPhone) || normalizedPhone.endsWith(convPhone);
+      });
+    }
+
+    return undefined;
+  }, [conversations]);
+
+  // Handle URL params to auto-select conversation
   useEffect(() => {
     if (conversations.length === 0 || selectedConversation) return;
 
     const clientIdParam = searchParams.get('client_id');
     const phoneParam = searchParams.get('phone');
+    if (!clientIdParam && !phoneParam) return;
 
-    let matchingConv: Conversation | undefined;
-
-    if (clientIdParam) {
-      matchingConv = conversations.find(c => c.client_id === clientIdParam);
-    } else if (phoneParam) {
-      const normalizedParam = phoneParam.replace(/[^0-9]/g, '');
-      matchingConv = conversations.find(c => {
-        const convPhone = c.client_phone.replace(/[^0-9]/g, '');
-        return convPhone === normalizedParam || convPhone.endsWith(normalizedParam) || normalizedParam.endsWith(convPhone);
-      });
-    }
+    const matchingConv = findMatchingConversation(clientIdParam, phoneParam);
 
     if (matchingConv) {
       setSelectedConversation(matchingConv);
-      setSearchParams({});
-    } else if (clientIdParam || phoneParam) {
-      setAutoSelectPending(clientIdParam || phoneParam!.replace(/[^0-9]/g, ''));
+      setSearchParams({}, { replace: true });
+      setAutoSelectPending(null);
+    } else {
+      // Store params for retry when conversations finish loading
+      setAutoSelectPending(JSON.stringify({ clientId: clientIdParam, phone: phoneParam }));
     }
-  }, [searchParams, conversations, selectedConversation, setSearchParams]);
+  }, [searchParams, conversations, selectedConversation, findMatchingConversation, setSearchParams]);
 
-  // Handle pending auto-select after conversations load
+  // Retry auto-select when conversations update
   useEffect(() => {
     if (!autoSelectPending || conversations.length === 0) return;
 
-    const matchingConv = conversations.find(c => {
-      if (c.client_id === autoSelectPending) return true;
-      const convPhone = c.client_phone.replace(/[^0-9]/g, '');
-      return convPhone === autoSelectPending || convPhone.endsWith(autoSelectPending) || autoSelectPending.endsWith(convPhone);
-    });
-    
+    let clientId: string | null = null;
+    let phone: string | null = null;
+    try {
+      const parsed = JSON.parse(autoSelectPending);
+      clientId = parsed.clientId;
+      phone = parsed.phone;
+    } catch {
+      // Legacy format (plain string) — treat as phone
+      phone = autoSelectPending;
+    }
+
+    const matchingConv = findMatchingConversation(clientId, phone);
+
     if (matchingConv) {
       setSelectedConversation(matchingConv);
       setAutoSelectPending(null);
-      setSearchParams({});
+      setSearchParams({}, { replace: true });
     }
-  }, [autoSelectPending, conversations, setSearchParams]);
+  }, [autoSelectPending, conversations, findMatchingConversation, setSearchParams]);
 
   // Load reminders for all conversations when they change
   useEffect(() => {
